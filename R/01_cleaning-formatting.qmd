@@ -182,8 +182,10 @@ scottish <-
         str_starts(location, "In someone's home")                               ~ "Home(s)",
         str_starts(location, "In another church's building, which we rent")     ~ "Rented church building",
         str_starts(location, "In another church's building, which we use free") ~ "Free church building",
-        str_starts(location, "In a rented space")                               ~ "Other rented space",
-        str_starts(location, "In a space owned")                                ~ "Space owned by plant") |> 
+        str_starts(location, "In a rented space")                               ~ "Rented space (not church building)",
+        str_starts(location, "In a space owned")                                ~ "Space owned by plant",
+        str_starts(location, "Other") ~
+          "Other") |> 
       factor() |> 
       fct_infreq(),
     

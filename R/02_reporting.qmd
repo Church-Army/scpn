@@ -1,0 +1,359 @@
+---
+title: "Results Overview"
+author: "Dave"
+format: html
+editor: visual
+echo: false
+# knitr: 
+#   opts_chunk: 
+#     dev: "cairo_svg"
+---
+
+## Set up
+
+### Libraries
+
+```{r libraries}
+library(fs)
+library(here)
+library(ggplot2)
+library(dplyr)
+library(carutools)
+library(forcats)
+library(scales)
+library(stringr)
+library(knitr)
+library(lubridate)
+library(tidyr)
+```
+
+### Read data
+
+```{r read_data}
+scot <- readRDS(here("data", "output-01_cleaned-formatted.RDS"))
+```
+
+## Helpers
+
+```{r helpers}
+theme_ca <- theme_ca("cyan") + theme(axis.ticks = element_line())
+theme_set(theme_ca)
+
+update_geom_defaults("bar", aes(fill = ca_cyan(), colour = "black"))
+
+
+percentify <- \(x, prec = 1) label_percent(prec)(prop.table(x))
+
+add_percent <- function(x, col = n){
+  col <- enexpr(col)
+  
+  mutate(x, `%` = percentify(!!col))
+}
+
+count_with_percent <- function(x, group){
+  
+  group = enexpr(group)
+  
+  group_by(x, !!group) |> 
+    count() |> 
+    ungroup() |> 
+    arrange(-n, !!group) |> 
+    add_percent()
+  
+}
+
+factor_table <- function(col, x = scot){
+  
+  col <- enexpr(col)
+  
+  count_with_percent(x, !!col) |> 
+    rename_with(str_to_title, 1)
+}
+
+```
+
+## Reporting
+
+### Denomination
+
+```{r denomination}
+mutate(scot, denomination =
+         ordered(denomination) |> 
+         fct_infreq()) |>
+  
+  ggplot(aes(x = denomination)) +
+  
+  geom_bar() +
+  
+  ylab("Church plants") + 
+  xlab("Denomination") +
+  ggtitle("Denominations of responding church plants") +
+  
+  theme(panel.grid.major.x = element_blank(),
+        axis.ticks.x = element_blank())
+
+factor_table(denomination) |> 
+  kable()
+```
+
+## Launch date
+
+```{r launch_date}
+scot <- mutate(scot, launch_date = make_date(start_year, start_month))
+
+dates <- 
+  group_by(scot, launch_date) |> 
+  count() |> 
+  ungroup() |> 
+  arrange(launch_date) |> 
+  mutate(n_plants = cumsum(n))
+
+ggplot(dates, aes(x = launch_date, y = n_plants)) + 
+  
+  geom_step(linewidth = 1, colour = ca_cyan()) +
+  
+  scale_y_continuous(
+    name = "Church plants", 
+    limits = c(0, NA),
+    breaks = 0:5 * 2
+  ) +
+  scale_x_date(name = "Date") +
+  ggtitle("Cumulative church plants over time")
+
+group_by(scot, start_year) |> 
+  count(name = "Churches planted") |> 
+  ungroup() |> 
+  arrange(start_year) |> 
+  rename(`Launch year` = start_year) |> 
+  complete(`Launch year` = full_seq(`Launch year`, 1), 
+           fill = list(n = 0)) |> 
+  kable()
+```
+
+### Attenders (current and at launch)
+
+#### Summary table
+
+Some measures of central tendency to begin with
+
+```{r attenders}
+
+attenders <- 
+  scot |> 
+  select(contains("attenders"), respondent_id) |> 
+  pivot_longer(-respondent_id,
+               names_to = "stat") |> 
+  separate_wider_regex(stat,
+                       patterns = c(
+                         time = "launch|current",
+                         "_attenders_",
+                         age  = "children|adult"
+                         )) |> 
+  pivot_wider(names_from = time, values_from = value) |> 
+  unnest(everything())
+
+attenders_summary <- 
+  group_by(attenders, age) |> 
+  select(-respondent_id) |> 
+  summarise(
+    across(everything(),
+           .fn = list(
+             mean   = \(x) mean(x, na.rm = TRUE),
+             median = \(x) median(x, na.rm = TRUE),
+             max    = \(x) max(x, na.rm = TRUE),
+             min    = \(x) min(x, na.rm = TRUE)), 
+           .names = "{.fn} ({.col})"
+           ))
+
+attenders_summary <- attenders_summary[order(names(attenders_summary))]
+
+kable(attenders_summary)
+```
+
+### Lollipop
+
+```{r lollipop}
+#| fig-width: 6
+
+attenders <- mutate(attenders,
+                    change = current - launch,
+                    age = str_to_title(age) |> 
+                      str_replace("Adult", "Adults"))
+
+positions <- 
+  summarise(attenders, change = sum(change, na.rm = TRUE), .by = respondent_id) |> 
+  arrange(change) |> 
+  mutate(pos = row_number()) |> 
+  select(respondent_id, pos)
+
+attenders <- left_join(attenders, positions, by = "respondent_id")
+
+long_tenders <- pivot_longer(attenders, c(launch, current),
+                             names_to = "time", values_to = "attenders")
+
+ggplot(long_tenders, aes(x = factor(pos))) +
+  
+    
+  geom_segment(mapping = aes(y = launch, yend = current),
+               data = attenders,
+               linewidth = 2,
+               alpha = 0.2) +
+
+  geom_point(data = long_tenders, aes(y = attenders, colour = time),
+             size = 3) +
+  
+  scale_colour_manual(values = c(ca_cyan(), ca_purple()),
+                      name = "Time point") +
+  
+  xlab("Churches") +
+  ylab("Attenders") +
+  
+  theme(axis.ticks.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        axis.text.x = element_blank(),
+        plot.background = element_rect(colour = "black", fill = NA)) +
+  
+  facet_wrap(~ age, dir = "h") +
+  ggtitle("Attendance has not diminished anywhere",
+          sub = "Either for adults or for children")
+```
+
+### Current attenders
+
+```{r current_attenders}
+attenders |> 
+  mutate(age = str_to_title(age) |> str_replace("Adult", "Adults")) |> 
+ggplot(aes(x = current)) +
+  geom_histogram(fill = ca_cyan(),
+                 binwidth = 10, boundary = 0) +
+  scale_x_continuous(breaks = seq(0, 200, 20))+
+  xlab("Attenders") +
+  ylab("Church plants") + 
+  facet_wrap(~ age, dir = "v") +
+  ggtitle("Current attenders")
+
+
+attenders |>
+  summarise(attenders = sum(current), .by = respondent_id) |> 
+  
+  ggplot(aes(x = attenders)) +
+  geom_histogram(fill = ca_cyan(), binwidth = 15, boundary = 0) +
+  scale_x_continuous(name = "Attenders", breaks = seq(0, 200, 30),
+                     limits = c(0, 200)) +
+  ylab("Church plants") +
+  ggtitle("Current attenders")
+```
+
+### Plant type
+
+```{r plant_type}
+scot |> 
+  filter(!is.na(plant_type)) |> 
+ggplot(aes(x = plant_type)) +
+  geom_bar() +
+  scale_x_discrete(name = "Church plant type", drop = FALSE) +
+  ylab("Church plants") +
+  ggtitle("Types of church plant")
+
+filter(scot, !is.na(plant_type)) |> 
+count_with_percent(plant_type) |> 
+  rename(`Plant type` = plant_type) |>
+  kable()
+  
+```
+
+## Geography
+
+```{r geography}
+not_na <- \(x) !is.na(x)
+
+geog_responders <- 
+  filter(scot, if_any(starts_with("geography_"), not_na)) |> 
+  nrow()
+
+
+geogs <- 
+  scot |> 
+  pivot_longer(starts_with("geography_") & !ends_with("_other"),
+               names_prefix = "geography_",
+               names_to = "geography", values_to = "is") |>
+  summarise(plants = sum(is), .by = geography)
+
+geog_table <-
+  geogs |>
+  arrange(-plants) |> 
+  mutate(`% responding plants` = label_percent(1)(plants / geog_responders)) |> 
+  mutate(geography =
+           str_to_title(geography) |> 
+           str_replace_all("_", " ") |> 
+           ordered() |> 
+           fct_inorder())
+
+kable(geog_table)
+
+kable(geog_table |> filter(plants > 0))
+
+geog_table |> 
+  filter(plants > 0) |> 
+  ggplot(aes(x = geography, y = plants)) +
+  geom_col() +
+  scale_x_discrete(name = "Geographical area") +
+  ggtitle("Geographical areas into which churches planted",
+         sub = "(Non-exclusive categories)") +
+  ylab("Church plants")
+```
+
+![](images/clipboard-1362719507.png)
+
+### Traditions
+
+```{r traditions}
+trad_responders <- 
+  filter(scot, if_any(starts_with("tradition_"), not_na)) |> 
+  nrow()
+
+
+trads <- 
+  scot |> 
+  pivot_longer(starts_with("tradition_") & !ends_with("_other"),
+               names_prefix = "tradition_",
+               names_to = "tradition", values_to = "is") |>
+  summarise(plants = sum(is), .by = tradition)
+
+trad_table <-
+  trads|>
+  arrange(-plants) |> 
+  mutate(`% responding plants` = label_percent(1)(plants / trad_responders)) |> 
+  mutate(tradition =
+           str_to_title(tradition) |> 
+           str_replace_all("_", " ") |> 
+           ordered() |> 
+           fct_inorder())
+
+kable(trad_table)
+
+kable(trad_table |> filter(plants > 0))
+
+trad_table |> 
+  filter(plants > 0) |> 
+  ggplot(aes(x = tradition, y = plants)) +
+  geom_col() +
+  scale_x_discrete(name = "Geographical area") +
+  ggtitle("Traditions of church-planting teams",
+         sub = "(Non-exclusive categories)") +
+  ylab("Church plants")
+```
+
+### Location
+
+```{r location}
+filter(scot, !is.na(location)) |> 
+  count_with_percent(location) |> 
+  kable()
+
+ggplot(scot, aes(x = location)) + 
+  geom_bar() +
+  ylab("Church plants") + 
+  xlab("Location") +
+  ggtitle("Meeting locations used by church plants")
+```
