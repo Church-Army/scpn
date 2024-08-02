@@ -1,0 +1,239 @@
+---
+title: "Cleaning data"
+author: "Dave"
+format: html
+editor: visual
+---
+
+## Set up
+
+### Libraries
+
+```{r libraries}
+library(fs)
+library(here)
+library(dplyr)
+library(monkeyreadr)
+library(stringr)
+library(forcats)
+```
+
+### Read csv
+
+```{r read_csv}
+#| cache: true
+scottish <- read_sm(here("inputs", "scpn-survey_2024-08-02.csv"))
+```
+
+## Drop columns
+
+### Helpers
+
+```{r helpers}
+remove_col_number <- function(x) str_remove(x, "_\\d*(?=$)")
+prefix <- function(x, ...) str_c(..., x, sep = "_")
+
+give_prefix <- function(x, ...){
+  remove_col_number(x) |> 
+    prefix(...)
+}
+
+prefix_include_other <- function(x, ...){
+  give_prefix(x, ...) |> 
+    str_remove("_please_specify")
+}
+```
+
+### Drop collector ID
+
+There's only one collector
+
+```{r drop_cols}
+scottish <- 
+  select(scottish, -collector_id)
+```
+
+### Drop ethical checks
+
+But not before we've double checked they're all checked.
+
+```{r drop_consents}
+with(scottish,
+     
+     stopifnot(
+       all(before_we_begin_please_confirm_the_following ==
+             "I have read the participant information sheet and know who to ask if I have any questions"),
+       all(i_understand_that_my_participation_in_this_research_is_voluntary_11 ==
+             "I understand that my participation in this research is voluntary")))
+
+scottish <- select(scottish, -before_we_begin_please_confirm_the_following,
+               -i_understand_that_my_participation_in_this_research_is_voluntary_11)
+```
+
+## Rename 
+
+```{r rename}
+names(scottish)[4:12] <- 
+  c("denomination", "denomination_other", "start_year", "start_month", 
+    "launch_attenders_adult", "launch_attenders_children",
+    "current_attenders_adult", "current_attenders_children", "plant_type")
+
+names(scottish)[13]    <- "geography_expanded_village"
+names(scottish)[14:23] <- prefix_include_other(names(scottish)[14:23], "geography")
+
+names(scottish)[24]    <- "tradition_catholic"
+names(scottish)[25:32] <- prefix_include_other(names(scottish)[25:32], "tradition")
+
+names(scottish)[33:34] <- c("location", "location_other")
+
+names(scottish)[39] <- "staff_member_5_fte"
+names(scottish)[40:42] <- remove_col_number(names(scottish)[40:42])
+
+names(scottish)[43:49] <- 
+  str_c(
+    "mission_focus",
+    c("geographical", "ethnic", "cultural", "religious", "dechurched", "none", "other"),
+    sep = "_"
+  )
+
+names(scottish)[50:56] <- 
+  c("pc_nonchurched", "pc_dechurched", "total_faith_commitments", "success_reaching_nondechurched",
+    "how_engage_nondechurched", "how_different_from_sending_services", "extent_develop_new_missional_practices")
+
+names(scottish)[57:62] <-
+  str_c(
+    c(rep("flourish", 3), rep("inhibit", 3)), 
+    "factor",
+    rep(1:3, 2),
+    sep = "_"
+  )
+
+
+```
+
+## Find incomplete
+
+```{r find_incomplete}
+missingness <-
+  mutate(scottish, across(everything(), as.character)) |> 
+  as.matrix() |> 
+  is.na() 
+
+last_non_missing <- apply(missingness, 1, \(x) max(which(!x)))
+
+completeness <- last_non_missing/ncol(missingness)
+
+hist(completeness)
+
+rbind(scottish, completeness)
+
+filter(scottish, completeness < 0.8, completeness > 0.2)
+filter(scottish, completeness < 0.2)
+
+scottish <- filter(scottish, completeness > 0.2)
+nrow(scottish)
+```
+
+## Format
+
+### Helpers
+
+```{r format_helpers}
+across_non_other <- function(x, .fun, ...) across(starts_with(str_c(x, "_")) & !ends_with("_other"), .fun, ...)
+
+not_na <- function(x) !is.na(x)
+```
+
+```{r format}
+scottish <- mutate(scottish, 
+                   across_non_other(c("geography", "tradition", "mission_focus"),
+                                    not_na))
+
+glimpse(select(scottish, starts_with("geography_")))
+```
+### Factors
+
+```{r factors}
+scottish <- 
+  mutate(
+    scottish, 
+    
+    denomination = replace(denomination, str_to_lower(denomination_other) == "fiec", "FIEC"),
+    denomination_other = replace(denomination_other, str_to_lower(denomination_other) == "fiec", NA),
+    
+    denomination = factor(denomination, levels = c("Elim", "Go Global", "Scottish Episcopal Church", "Free Church of Scotland", "Scottish Baptist Union",
+                                                   "New Frontiers", "Assemblies of God", "Church of Scotland", "Scottish Network Churches", "Vineyard",
+                                                   "Redeemed Christian Church of God", "Church of the Nazarene", "ReHope", "Salvation Army",
+                                                   "Free Methodist Church", "Cairn Movement", "FIEC")),
+    
+    plant_type =
+      case_when(
+        str_starts(plant_type, "Relaunch")      ~ "Relaunch/revitalisation",
+        str_starts(plant_type, "An entirely")   ~ "Entirely new church",
+        str_starts(plant_type, "Establishment") ~ "Linked worshipping community") |> 
+      factor() |> 
+      fct_infreq(),
+    
+    location = 
+      case_when(
+        str_starts(location, "In someone's home")                               ~ "Home(s)",
+        str_starts(location, "In another church's building, which we rent")     ~ "Rented church building",
+        str_starts(location, "In another church's building, which we use free") ~ "Free church building",
+        str_starts(location, "In a rented space")                               ~ "Other rented space",
+        str_starts(location, "In a space owned")                                ~ "Space owned by plant") |> 
+      factor() |> 
+      fct_infreq(),
+    
+    success_reaching_nondechurched = ordered(success_reaching_nondechurched, 
+                                             levels = c("Very unsuccessful", "Moderately unsuccessful", "Mildly successful",
+                                                        "Moderately successful", "Very successful")),
+    
+    extent_develop_new_missional_practices = ordered(extent_develop_new_missional_practices,
+                                                     levels = c("Not at all", "A little", "Somewhat", "Quite a lot", "A great deal"))
+  )
+```
+
+### Launch date
+
+```{r launch_date}
+
+format_start_month <- function(x){
+  
+  x[x %in% month.name] <- 
+    str_to_title(x[x %in% month.name]) |> 
+    match(month.name)
+  
+  short <- str_sub(month.name, 1, 3)
+  
+    x[x %in% short] <- 
+    str_to_title(x[x %in% short]) |> 
+    match(short)
+    
+  as.numeric(x)
+}
+
+scottish <- 
+  mutate(
+    scottish,
+    start_year  = as.numeric(start_year),
+    start_month = format_start_month(start_month)
+  )
+```
+
+### Numerics
+
+```{r numerics}
+scottish <- 
+  mutate(
+    scottish, 
+    across(starts_with(c("launch_attenders_", "current_attenders", "percent_fte_", "staff_member_",
+                         "pc_non", "pc_de", "total_faith_", "how_different_")),
+           as.numeric))
+```
+## Save
+
+```{r save}
+data <- dir_create(here("data"))
+
+saveRDS(scottish, path(data, "output_01-cleaned-formatted.RDS"))
+```
