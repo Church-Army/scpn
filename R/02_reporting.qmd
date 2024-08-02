@@ -25,6 +25,7 @@ library(stringr)
 library(knitr)
 library(lubridate)
 library(tidyr)
+library(purrr)
 ```
 
 ### Read data
@@ -237,7 +238,7 @@ attenders |>
   summarise(attenders = sum(current), .by = respondent_id) |> 
   
   ggplot(aes(x = attenders)) +
-  geom_histogram(fill = ca_cyan(), binwidth = 15, boundary = 0) +
+  geom_histogram(fill = ca_cyan(), binwidth = 15, boundary = 0.9) +
   scale_x_continuous(name = "Attenders", breaks = seq(0, 200, 30),
                      limits = c(0, 200)) +
   ylab("Church plants") +
@@ -356,4 +357,48 @@ ggplot(scot, aes(x = location)) +
   ylab("Church plants") + 
   xlab("Location") +
   ggtitle("Meeting locations used by church plants")
+```
+
+## FTE
+
+#### Members of staff
+
+```{r staff_members}
+add <- function(x){
+  x[is.na(x)] <- 0
+  reduce(x, `+`)
+}
+
+employees <- 
+  select(scot, respondent_id, starts_with(c("percent_fte", "staff_member"))) |> 
+  mutate(across(-respondent_id, not_na)) |>
+  pivot_longer(-respondent_id) |> 
+  summarise(employees = sum(value), .by = respondent_id)
+
+scot <- left_join(scot, employees, by = "respondent_id")
+
+ggplot(scot, aes(x = employees)) + 
+  geom_histogram(binwidth = 1) +
+  scale_x_continuous("Paid members of staff", breaks = 0:6) +
+  ylab("Church plants") +
+  ggtitle("Paid members of staff across all church plants")
+
+count_with_percent(scot, employees) |> 
+  arrange(employees) |> 
+  kable()
+```
+
+#### Full time equivalent hours worked
+
+```{r fte_worked}
+scot <-
+  rowwise(scot) |> 
+  mutate(fte = add(c_across(starts_with(c("percent_fte_", "staff_member_"))))) |>
+  mutate(fte = fte/100) |> 
+  ungroup()
+
+scot$fte
+
+ggplot(scot) +
+  geom_density(aes(x = fte))
 ```
