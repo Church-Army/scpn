@@ -171,8 +171,10 @@ scottish <-
       case_when(
         str_starts(plant_type, "Relaunch")      ~ "Relaunch/revitalisation",
         str_starts(plant_type, "An entirely")   ~ "Entirely new church",
-        str_starts(plant_type, "Establishment") ~ "Linked worshipping community") |> 
-      factor() |> 
+        str_starts(plant_type, "Establishment") ~ "Linked worshipping community") |>
+      factor(levels = c("Relaunch/revitalisation",
+                        "Entirely new church",
+                        "Linked worshipping community")) |> 
       fct_infreq(),
     
     location = 
