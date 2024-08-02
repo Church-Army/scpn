@@ -70,7 +70,7 @@ scottish <- select(scottish, -before_we_begin_please_confirm_the_following,
                -i_understand_that_my_participation_in_this_research_is_voluntary_11)
 ```
 
-## Rename 
+## Rename
 
 ```{r rename}
 names(scottish)[4:12] <- 
@@ -151,6 +151,7 @@ scottish <- mutate(scottish,
 
 glimpse(select(scottish, starts_with("geography_")))
 ```
+
 ### Factors
 
 ```{r factors}
@@ -230,10 +231,11 @@ scottish <-
                          "pc_non", "pc_de", "total_faith_", "how_different_")),
            as.numeric))
 ```
+
 ## Save
 
 ```{r save}
 data <- dir_create(here("data"))
 
-saveRDS(scottish, path(data, "output_01-cleaned-formatted.RDS"))
+saveRDS(scottish, path(data, "output-01_cleaned-formatted.RDS"))
 ```
