@@ -22,7 +22,7 @@ library(forcats)
 
 ```{r read_csv}
 #| cache: true
-scottish <- read_sm(here("inputs", "scpn-survey_2024-08-02.csv"))
+scottish <- read_sm(here("inputs", "scpn-survey_2024-08-06.csv"))
 ```
 
 ## Drop columns

@@ -1,7 +1,9 @@
 ---
 title: "Results Overview"
 author: "Dave"
-format: html
+format:
+  html:
+    fig-dpi: 300
 editor: visual
 echo: false
 # knitr: 
@@ -26,6 +28,7 @@ library(knitr)
 library(lubridate)
 library(tidyr)
 library(purrr)
+library(ggbeeswarm)
 ```
 
 ### Read data
@@ -110,8 +113,17 @@ dates <-
   mutate(n_plants = cumsum(n))
 
 ggplot(dates, aes(x = launch_date, y = n_plants)) + 
+  geom_rect(aes(ymin = 0,
+                xmax = lead(launch_date,
+                           default = max(launch_date) + period(4, "month")),
+                xmin = launch_date,
+                ymax = n_plants),
+            fill = ca_cyan(),
+            alpha = 0.7) + 
   
   geom_step(linewidth = 1, colour = ca_cyan()) +
+  
+  
   
   scale_y_continuous(
     name = "Church plants", 
@@ -243,6 +255,11 @@ attenders |>
                      limits = c(0, 200)) +
   ylab("Church plants") +
   ggtitle("Current attenders")
+
+## total attenders:
+
+sum(attenders$current)
+sum(attenders$launch)
 ```
 
 ### Plant type
@@ -391,6 +408,13 @@ count_with_percent(scot, employees) |>
 #### Full time equivalent hours worked
 
 ```{r fte_worked}
+beeswarmify <- function(x, mult = 1){
+  len <- length(x)
+  pos <- 1:len
+  
+  (pos - mean(pos)) * mult
+}
+
 scot <-
   rowwise(scot) |> 
   mutate(fte = add(c_across(starts_with(c("percent_fte_", "staff_member_"))))) |>
@@ -401,4 +425,136 @@ scot$fte
 
 ggplot(scot) +
   geom_density(aes(x = fte))
+
+ggplot(scot) + 
+  geom_point(aes(x = employees, y = fte), 
+             alpha = 0.5, colour = ca_cyan(), size = 2) +
+  geom_abline(intercept = 0, slope = 0.5, 
+              linetype = "dashed")
+
+scot |> 
+  pivot_longer(starts_with(c("percent_fte_", "staff_member")),
+               names_to = "remove", values_to = "employee_fte") |> 
+  select(-remove) |> 
+  mutate(respondent_id = ordered(respondent_id)) |> 
+  filter(!is.na(employee_fte)) |> 
+  mutate(employee_fte = employee_fte/100,
+         respondent_id = fct_reorder(respondent_id, -employee_fte, sum)) |>
+  mutate(y_pos = beeswarmify(employee_fte, mult = 0.75),
+         .by = c(respondent_id, employee_fte)) |> 
+  
+  ggplot(aes(y = y_pos, x = employee_fte)) +
+  
+  geom_point(colour = ca_cyan(), size = 2, alpha = 0.9) +
+  
+  scale_y_discrete(drop = FALSE) +
+  
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.background = element_rect(fill = NA, colour = "gray90"),
+    strip.text = element_blank(),
+    panel.spacing.y = unit(.25, "lines"),
+    plot.caption = element_text(colour = "gray30")
+  ) +
+  
+  labs(y = "Churh plant",
+       x = "Employees by FTE",
+       caption = "Some FTE represent appx. % of split roles") + 
+  
+  facet_wrap(~respondent_id, dir = "v", ncol = 1, scales = "free_y",
+            strip.position = "left", drop = FALSE) +
+  ggtitle("Variation in Employees/FTE",
+          sub = "Across all church plants")
+```
+
+## Mission focus
+
+```{r plot_mission_focus}
+mission_foci <- 
+  scot |> 
+  mutate(mission_focus_other = !is.na(mission_focus_other)) |> 
+  filter(if_any(starts_with("mission_focus_"))) |>
+  summarise(across(starts_with("mission_focus"),
+                   \(x) sum(x) / length(x))) |> 
+  pivot_longer(everything(), names_to = "mission_focus",
+               names_prefix = "mission_focus_",
+               values_to = "percent_respondents") |> 
+  mutate(mission_focus =
+           ordered(mission_focus) |> 
+           fct_reorder(-percent_respondents))
+
+ggplot(mission_foci, aes(x = mission_focus, y = percent_respondents)) + 
+  geom_col() +
+  
+  scale_y_continuous(name = "% Church plants", lim = 0:1,
+                     labels = label_percent(1)) +
+  
+  scale_x_discrete(name = "Mission focus", labels = str_to_title) +
+  ggtitle("Most plants had a geographical mission focus",
+          sub = "")
+
+scot |> 
+  select(respondent_id, starts_with("mission_focus")) |> 
+  select(-mission_focus_none) |> 
+  mutate(mission_focus_other = !is.na(mission_focus_other)) |> 
+  filter(if_any(starts_with("mission_focus_"))) |> 
+  pivot_longer(-respondent_id, names_to = "focus", values_to = "is") |> 
+  summarise(n_foci = sum(is), .by = respondent_id) |>
+  summarise(n_plants = n(), .by = n_foci) |>
+  complete(n_foci = full_seq(n_foci, 1), fill = list(n_plants = 0)) |> 
+  add_percent(n_plants) |> 
+  rename(`Missional "foci"` = `n_foci`,
+         `Church plants` = `n_plants`) |> 
+  kable()
+
+filter(scot, !is.na(mission_focus_other)) |> 
+  pull(mission_focus_other)
+```
+
+Most church plants only identified one missional focus.
+
+## % Non/dechurched
+
+```{r pc_non_de}
+scot <- mutate(scot, pc_non_de = pc_nonchurched + pc_dechurched)
+
+non_de_resp <- sum(!is.na(scot$pc_non_de))
+
+ggplot(scot, aes(x = pc_non_de)) +
+  geom_histogram(binwidth = 10, boundary = 0.25) +
+  
+  scale_x_continuous(name = "Non/de-churched attenders",
+                     breaks = seq(0,100, 10), limits = c(0,100),
+                     labels = \(x) str_c(x, "%")) +
+  scale_y_continuous(name = "Church plants", 
+                     sec.axis = sec_axis(transform = \(y) y/non_de_resp,
+                                         labels = label_percent(1),
+                                         breaks = 1:10/non_de_resp)) +
+  ggtitle("% Non/de-churched attenders at each church plant") +
+  
+  theme(panel.grid.minor = element_blank()) 
+
+
+ggplot(scot, aes(x = pc_nonchurched, y = pc_dechurched)) + 
+  geom_point()
+
+```
+
+## Measures of central tendency
+
+```{r measures_central_tendency}
+scot |> 
+  summarise(across(where(is.numeric),
+            list(mean =   \(x) mean(x, na.rm = TRUE),
+                 median = \(x) median(x, na.rm = TRUE),
+                 max =    \(x) max(x, na.rm = TRUE),
+                 min =    \(x) min(x, na.rm = TRUE),
+                 total =  \(x) sum(x, na.rm = TRUE)),
+            .names = "{.col}//{.fn}")) |> 
+  pivot_longer(everything(), names_sep = "//",
+               names_to = c("variable", "statistic")) |> 
+  pivot_wider(names_from = "statistic") |> 
+  mutate(across(where(is.numeric), \(x) round(x, 2))) |> 
+  kable()
 ```
