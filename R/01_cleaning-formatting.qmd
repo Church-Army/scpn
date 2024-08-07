@@ -189,9 +189,11 @@ scottish <-
       factor() |> 
       fct_infreq(),
     
-    success_reaching_nondechurched = ordered(success_reaching_nondechurched, 
-                                             levels = c("Very unsuccessful", "Moderately unsuccessful", "Mildly successful",
-                                                        "Moderately successful", "Very successful")),
+    success_reaching_nondechurched =
+      ordered(success_reaching_nondechurched,
+              levels = c("Very unsuccessful", "Moderately unsuccessful",
+                         "Mildly unsuccessful", "Mildly successful",
+                         "Moderately successful", "Very successful")),
     
     extent_develop_new_missional_practices = ordered(extent_develop_new_missional_practices,
                                                      levels = c("Not at all", "A little", "Somewhat", "Quite a lot", "A great deal"))
@@ -221,8 +223,8 @@ scottish <-
   mutate(
     scottish,
     start_year  = as.numeric(start_year),
-    start_month = format_start_month(start_month)
-  )
+    start_month = format_start_month(start_month))
+
 ```
 
 ### Numerics

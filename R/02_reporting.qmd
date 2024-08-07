@@ -2,14 +2,18 @@
 title: "Results Overview"
 author: "Dave"
 format:
-  html:
-    fig-dpi: 300
+  docx:
+    fig-dpi: 600
 editor: visual
 echo: false
 # knitr: 
 #   opts_chunk: 
 #     dev: "cairo_svg"
 ---
+
+# Hello!
+
+Welcome to this overview of SCPN quant data, which provides graphs and tabulations of most of the questions from our survey. If you're looking for totals and averages, check the table right at the bottom.
 
 ## Set up
 
@@ -74,6 +78,7 @@ factor_table <- function(col, x = scot){
     rename_with(str_to_title, 1)
 }
 
+church_plants <- \(x) rename(x, `Church plants` = n)
 ```
 
 ## Reporting
@@ -97,6 +102,7 @@ mutate(scot, denomination =
         axis.ticks.x = element_blank())
 
 factor_table(denomination) |> 
+  church_plants() |> 
   kable()
 ```
 
@@ -153,7 +159,7 @@ Some measures of central tendency to begin with
 
 attenders <- 
   scot |> 
-  select(contains("attenders"), respondent_id) |> 
+  select(contains("attenders"), respondent_id) |>
   pivot_longer(-respondent_id,
                names_to = "stat") |> 
   separate_wider_regex(stat,
@@ -176,7 +182,8 @@ attenders_summary <-
              max    = \(x) max(x, na.rm = TRUE),
              min    = \(x) min(x, na.rm = TRUE)), 
            .names = "{.fn} ({.col})"
-           ))
+           )) |> 
+  mutate(across(where(is.numeric), \(x) round(x, 2)))
 
 attenders_summary <- attenders_summary[order(names(attenders_summary))]
 
@@ -235,7 +242,7 @@ ggplot(long_tenders, aes(x = factor(pos))) +
 
 ```{r current_attenders}
 attenders |> 
-  mutate(age = str_to_title(age) |> str_replace("Adult", "Adults")) |> 
+  mutate(age = str_to_title(age)) |> 
 ggplot(aes(x = current)) +
   geom_histogram(fill = ca_cyan(),
                  binwidth = 10, boundary = 0) +
@@ -269,13 +276,16 @@ scot |>
   filter(!is.na(plant_type)) |> 
 ggplot(aes(x = plant_type)) +
   geom_bar() +
-  scale_x_discrete(name = "Church plant type", drop = FALSE) +
+  scale_x_discrete(name = "Church plant type", drop = FALSE,
+                   guide = guide_axis(n.dodge = 2)) +
   ylab("Church plants") +
-  ggtitle("Types of church plant")
+  ggtitle("Types of church plant") +
+  scale_y_continuous(breaks = seq(0, 10, 2))
 
 filter(scot, !is.na(plant_type)) |> 
 count_with_percent(plant_type) |> 
   rename(`Plant type` = plant_type) |>
+  church_plants() |> 
   kable()
   
 ```
@@ -305,11 +315,13 @@ geog_table <-
            str_to_title(geography) |> 
            str_replace_all("_", " ") |> 
            ordered() |> 
-           fct_inorder())
+           fct_inorder()) 
 
-kable(geog_table)
 
-kable(geog_table |> filter(plants > 0))
+geog_table |> 
+  filter(plants > 0) |> 
+  rename(`Church plants` = plants) |> 
+  kable()
 
 geog_table |> 
   filter(plants > 0) |> 
@@ -318,10 +330,13 @@ geog_table |>
   scale_x_discrete(name = "Geographical area") +
   ggtitle("Geographical areas into which churches planted",
          sub = "(Non-exclusive categories)") +
-  ylab("Church plants")
+  ylab("Church plants") +
+  scale_y_continuous(
+    sec.axis = sec_axis(
+      transform = \(x) x/geog_responders,
+      labels = label_percent(),
+      breaks = seq(1, 7, 2)/geog_responders))
 ```
-
-![](images/clipboard-1362719507.png)
 
 ### Traditions
 
@@ -329,7 +344,6 @@ geog_table |>
 trad_responders <- 
   filter(scot, if_any(starts_with("tradition_"), not_na)) |> 
   nrow()
-
 
 trads <- 
   scot |> 
@@ -348,9 +362,9 @@ trad_table <-
            ordered() |> 
            fct_inorder())
 
-kable(trad_table)
-
-kable(trad_table |> filter(plants > 0))
+trad_table |>
+  rename(`Church plants` = plants) |>
+  kable()
 
 trad_table |> 
   filter(plants > 0) |> 
@@ -359,7 +373,13 @@ trad_table |>
   scale_x_discrete(name = "Geographical area") +
   ggtitle("Traditions of church-planting teams",
          sub = "(Non-exclusive categories)") +
-  ylab("Church plants")
+  ylab("Church plants") +
+  scale_y_continuous(
+    breaks = seq(0, 10, 2),
+    sec.axis = sec_axis(transform = \(x) x/trad_responders,
+                        labels = label_percent(),
+                        breaks = seq(0, 10, 2)/trad_responders)
+  )
 ```
 
 ### Location
@@ -367,13 +387,26 @@ trad_table |>
 ```{r location}
 filter(scot, !is.na(location)) |> 
   count_with_percent(location) |> 
+  church_plants() |> 
   kable()
+
+n_loc_r <- sum(!is.na(scot$location))
 
 ggplot(scot, aes(x = location)) + 
   geom_bar() +
   ylab("Church plants") + 
   xlab("Location") +
-  ggtitle("Meeting locations used by church plants")
+  ggtitle("Meeting locations used by church plants") +
+  scale_y_continuous(
+    sec.axis = sec_axis(
+      transform = \(x) x / n_loc_r,
+      labels = label_percent(),
+      breaks = seq(0, 20, 2) / n_loc_r
+    )
+  ) +
+  scale_x_discrete(
+    guide = guide_axis(n.dodge = 2)
+  )
 ```
 
 ## FTE
@@ -396,12 +429,20 @@ scot <- left_join(scot, employees, by = "respondent_id")
 
 ggplot(scot, aes(x = employees)) + 
   geom_histogram(binwidth = 1) +
+  
   scale_x_continuous("Paid members of staff", breaks = 0:6) +
+  scale_y_continuous(
+    sec.axis = sec_axis(
+      transform = \(x) x/nrow(scot),
+      labels = label_percent(),
+      breaks = seq(0, 6, 2)/nrow(scot))) +
+  
   ylab("Church plants") +
-  ggtitle("Paid members of staff across all church plants")
+  ggtitle("Paid members of staff across all church plants") 
 
 count_with_percent(scot, employees) |> 
   arrange(employees) |> 
+  church_plants() |> 
   kable()
 ```
 
@@ -423,9 +464,11 @@ scot <-
 
 scot$fte
 
+foo <- 
 ggplot(scot) +
   geom_density(aes(x = fte))
 
+bar <- 
 ggplot(scot) + 
   geom_point(aes(x = employees, y = fte), 
              alpha = 0.5, colour = ca_cyan(), size = 2) +
@@ -476,19 +519,35 @@ mission_foci <-
   mutate(mission_focus_other = !is.na(mission_focus_other)) |> 
   filter(if_any(starts_with("mission_focus_"))) |>
   summarise(across(starts_with("mission_focus"),
-                   \(x) sum(x) / length(x))) |> 
-  pivot_longer(everything(), names_to = "mission_focus",
-               names_prefix = "mission_focus_",
-               values_to = "percent_respondents") |> 
+                   list(prop = \(x) sum(x) / length(x),
+                        count = \(x) sum(x)))) |> 
+  pivot_longer(everything(),
+               names_to = c("mission_focus", "stat"),
+               names_pattern = "mission_focus_(.+)_(prop|count)") |>
+  pivot_wider(names_from = stat) |> 
   mutate(mission_focus =
            ordered(mission_focus) |> 
-           fct_reorder(-percent_respondents))
+           fct_reorder(-prop) |> 
+           fct_relevel("None", after = Inf)) |> 
+  arrange(-prop)
 
-ggplot(mission_foci, aes(x = mission_focus, y = percent_respondents)) + 
+m_f_resp <- 
+  scot |> 
+  mutate(mission_focus_other = !is.na(mission_focus_other)) |> 
+  filter(if_any(starts_with("mission_focus_"))) |> 
+  nrow()
+
+ggplot(mission_foci, aes(x = mission_focus, y = count)) + 
   geom_col() +
   
-  scale_y_continuous(name = "% Church plants", lim = 0:1,
-                     labels = label_percent(1)) +
+  scale_y_continuous(name = "Church plants",
+                     breaks = seq(0,10,2),
+                     sec.axis = sec_axis(
+                       transform = \(x) x / m_f_resp,
+                       labels = label_percent(),
+                       breaks = seq(0,10, 2)/m_f_resp,
+                       name = "% responding plants"
+                     )) +
   
   scale_x_discrete(name = "Mission focus", labels = str_to_title) +
   ggtitle("Most plants had a geographical mission focus",
@@ -535,22 +594,187 @@ ggplot(scot, aes(x = pc_non_de)) +
   
   theme(panel.grid.minor = element_blank()) 
 
-
+baz <- 
 ggplot(scot, aes(x = pc_nonchurched, y = pc_dechurched)) + 
   geom_point()
 
+# scot |> 
+#   select(-pc_non_de) |> 
+#   pivot_longer(starts_with("pc_"),
+#                names_to = "non_de",
+#                values_to = "percent") |> 
+#   ggplot(aes(x = percent)) +
+#   geom_histogram(binwidth = 10, boundary = 0.9) +
+#   
+#   facet_wrap(~ non_de, dir = "v")
+
+```
+
+## Faith commitments
+
+An overview of distribution for internal benefit
+
+```{r faith_commitments}
+n_resp_fc <- sum(!is.na(scot$total_faith_commitments))
+
+ggplot(scot) + 
+  geom_beeswarm(aes(y = total_faith_commitments, x = 1),
+                size = 1, alpha = 0.6, colour = ca_cyan()) +
+  scale_x_continuous(limits = c(0.9,1.5))
+```
+
+## Success in reaching non/dechurched
+
+```{r success_reaching_non_de}
+
+n_srn_resp <- sum(!is.na(scot$success_reaching_nondechurched))
+
+filter(scot, !is.na(success_reaching_nondechurched)) |> 
+ggplot(aes(x = success_reaching_nondechurched)) + 
+  geom_bar() +
+  scale_x_discrete(drop = FALSE, labels = \(x) str_replace(x, " ", "\n")) +
+  scale_y_continuous(
+    sec.axis = sec_axis(
+      transform = \(x) x/n_srn_resp,
+      labels = label_percent(1),
+      breaks = 0:5/n_srn_resp
+    )
+  ) +
+  labs(
+    y = "Church plants",
+    x = "Success in reaching non/de-churched people",
+    title = "Most church plants are reaching non/de-churched people",
+    subtitle = "(Success compared to anticipated success)"
+  )
+
+scot |> 
+  filter(!is.na(success_reaching_nondechurched)) |> 
+  count_with_percent(success_reaching_nondechurched) |> 
+  rename(`Success in reaching non/de-churched` = 1,
+         `Church plants` = n) |> 
+  complete(`Success in reaching non/de-churched`,
+          fill = list(`Church plants` = 0, `%` = "0%")) |> 
+  kable()
+```
+
+### Difference services
+
+```{r difference_services}
+scot$how_different_from_sending_services
+ggplot(scot, aes(x = how_different_from_sending_services)) + 
+  geom_density(fill = ca_cyan(), col = ca_cyan(), 
+               alpha = 0.5) +
+  
+  scale_x_continuous(lim = c(0,100)) +
+  
+  labs(
+    y = "Density",
+    x = "Difference from sending church service",
+    title = "How different are services to sending church?",
+    subtitle = "Density visualisation of scores from 0 - 100"
+  ) +
+  
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+```
+
+## Extent to which church plants have had to develop new missional practises
+
+```{r develop_practises}
+n_prac_resp <- sum(!is.na(scot$extent_develop_new_missional_practices))
+
+filter(scot, !is.na(extent_develop_new_missional_practices)) |> 
+ggplot(aes(x = extent_develop_new_missional_practices)) +
+  geom_bar() +
+  
+  scale_x_discrete(drop = FALSE) +
+  scale_y_continuous(
+    sec.axis = sec_axis(
+      transform = \(x) x/n_prac_resp,
+      labels = label_percent(),
+      breaks = 0:3/n_prac_resp
+    )
+  ) +
+  labs(
+    title = "Extent to which new missional practises have been developed",
+    y = "Church plants",
+    x = "Extent"
+  )
+
+scot |> 
+  filter(!is.na(extent_develop_new_missional_practices)) |> 
+  count_with_percent(extent_develop_new_missional_practices) |> 
+  complete(extent_develop_new_missional_practices,
+           fill = list(n = 0, `%` = "0%")) |> 
+  rename(
+    "Extent of development of new missional practices" = 1,
+    "Church plants" = 2
+  ) |> 
+  kable()
+```
+
+## Various freetext fields
+
+### Flourish factors
+
+```{r flourish_factors}
+#| output: asis
+
+bullets <- function(x){
+  str_c("* ", x, collapse = "\n")
+}
+
+scot |> 
+  pivot_longer(starts_with("flourish_")) |> 
+  filter(!is.na(value)) |> 
+  pull(value) |> 
+  bullets()
+```
+
+### Inhibit factors
+
+```{r inhibit_factors}
+#| output: asis 
+scot |> 
+  pivot_longer(starts_with("inhibit_")) |> 
+  filter(!is.na(value)) |> 
+  pull(value) |> 
+  bullets()
+```
+
+### How engage non/de churched
+
+```{r how_enage_non_de}
+scot |> 
+  filter(!is.na(how_engage_nondechurched)) |> 
+  select(how_engage_nondechurched) |> 
+  kable()
 ```
 
 ## Measures of central tendency
 
 ```{r measures_central_tendency}
+scot <- 
+  mutate(scot, total_current_attenders =
+           current_attenders_children + current_attenders_adult) |> 
+  relocate(total_current_attenders, .after = current_attenders_children)
+
+scot <- relocate(scot, employees, fte, .after = staff_member_8_fte)
+scot <- relocate(scot, launch_date, .after = start_month)
+scot <- relocate(scot, pc_non_de, .after = pc_dechurched)
+
+scot <- select(scot, where(\(x) !all(is.na(x))))
+
 scot |> 
   summarise(across(where(is.numeric),
-            list(mean =   \(x) mean(x, na.rm = TRUE),
-                 median = \(x) median(x, na.rm = TRUE),
-                 max =    \(x) max(x, na.rm = TRUE),
-                 min =    \(x) min(x, na.rm = TRUE),
-                 total =  \(x) sum(x, na.rm = TRUE)),
+            list(
+              sum = \(x) sum(x, na.rm = TRUE),
+              mean =   \(x) mean(x, na.rm = TRUE),
+              median = \(x) median(x, na.rm = TRUE),
+              max =    \(x) max(x, na.rm = TRUE),
+              min =    \(x) min(x, na.rm = TRUE)),
             .names = "{.col}//{.fn}")) |> 
   pivot_longer(everything(), names_sep = "//",
                names_to = c("variable", "statistic")) |> 
