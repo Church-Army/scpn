@@ -4,6 +4,8 @@ author: "Dave"
 format:
   docx:
     fig-dpi: 600
+    fig-width: 6
+    reference-doc: ca-template.docx
 editor: visual
 echo: false
 # knitr: 
@@ -33,6 +35,7 @@ library(lubridate)
 library(tidyr)
 library(purrr)
 library(ggbeeswarm)
+library(rlang)
 ```
 
 ### Read data
@@ -45,6 +48,7 @@ scot <- readRDS(here("data", "output-01_cleaned-formatted.RDS"))
 
 ```{r helpers}
 theme_ca <- theme_ca("cyan") + theme(axis.ticks = element_line())
+
 theme_set(theme_ca)
 
 update_geom_defaults("bar", aes(fill = ca_cyan(), colour = "black"))
@@ -79,11 +83,27 @@ factor_table <- function(col, x = scot){
 }
 
 church_plants <- \(x) rename(x, `Church plants` = n)
+
+relabeller <- function(...){
+  
+  dots <- enexprs(...)
+  
+  new_function(
+    args = pairlist2(x =),
+    body = expr({
+      case_match(
+        x,
+        !!!dots,
+        .default = x
+      )}
+      ))}
 ```
 
 ## Reporting
 
 ### Denomination
+
+What denomination/network/movement is your church plant affiliated with?
 
 ```{r denomination}
 mutate(scot, denomination =
@@ -96,10 +116,17 @@ mutate(scot, denomination =
   
   ylab("Church plants") + 
   xlab("Denomination") +
+  
+  scale_x_discrete(
+    labels = relabeller(
+      "Assemblies of God" ~ "Assemblies of\nGod",
+      "Scottish Network Churches" ~ "Scottish Network\nChurches"
+    )
+  ) +
+  
   ggtitle("Denominations of responding church plants") +
   
-  theme(panel.grid.major.x = element_blank(),
-        axis.ticks.x = element_blank())
+  theme(panel.grid.major.x = element_blank())
 
 factor_table(denomination) |> 
   church_plants() |> 
@@ -107,6 +134,8 @@ factor_table(denomination) |>
 ```
 
 ## Launch date
+
+When did the church plant start?
 
 ```{r launch_date}
 scot <- mutate(scot, launch_date = make_date(start_year, start_month))
@@ -134,7 +163,7 @@ ggplot(dates, aes(x = launch_date, y = n_plants)) +
   scale_y_continuous(
     name = "Church plants", 
     limits = c(0, NA),
-    breaks = 0:5 * 2
+    breaks = 0:10 * 2
   ) +
   scale_x_date(name = "Date") +
   ggtitle("Cumulative church plants over time")
@@ -150,6 +179,12 @@ group_by(scot, start_year) |>
 ```
 
 ### Attenders (current and at launch)
+
+Questions asked:
+
+-   What average attendance (or sized team) did you launch with? \[Adults \| Children\]
+
+-   What is your current average attendance \[Adults \| Children\]
 
 #### Summary table
 
@@ -230,8 +265,7 @@ ggplot(long_tenders, aes(x = factor(pos))) +
   
   theme(axis.ticks.x = element_blank(),
         panel.grid.major.x = element_blank(),
-        axis.text.x = element_blank(),
-        plot.background = element_rect(colour = "black", fill = NA)) +
+        axis.text.x = element_blank()) +
   
   facet_wrap(~ age, dir = "h") +
   ggtitle("Attendance has not diminished anywhere",
@@ -241,6 +275,8 @@ ggplot(long_tenders, aes(x = factor(pos))) +
 ### Current attenders
 
 ```{r current_attenders}
+n_resp_att <- ceiling(sum(!is.na(attenders$current))/2)
+
 attenders |> 
   mutate(age = str_to_title(age)) |> 
 ggplot(aes(x = current)) +
@@ -249,6 +285,16 @@ ggplot(aes(x = current)) +
   scale_x_continuous(breaks = seq(0, 200, 20))+
   xlab("Attenders") +
   ylab("Church plants") + 
+  
+  scale_y_continuous(
+    sec.axis = 
+      sec_axis(
+        transform = \(x) x / n_resp_att,
+        labels = label_percent(1),
+        breaks = seq(0, 10, 2)/n_resp_att
+      )
+  ) +
+  
   facet_wrap(~ age, dir = "v") +
   ggtitle("Current attenders")
 
@@ -260,6 +306,14 @@ attenders |>
   geom_histogram(fill = ca_cyan(), binwidth = 15, boundary = 0.9) +
   scale_x_continuous(name = "Attenders", breaks = seq(0, 200, 30),
                      limits = c(0, 200)) +
+  scale_y_continuous(
+    sec.axis = 
+      sec_axis(
+        transform = \(x) x / n_resp_att,
+        labels = label_percent(1),
+        breaks = seq(0, 10, 1)/n_resp_att
+      )) +
+  
   ylab("Church plants") +
   ggtitle("Current attenders")
 
@@ -271,26 +325,48 @@ sum(attenders$launch)
 
 ### Plant type
 
+Which of the following best describes how you church plant started?
+
+-   Relaunch or revitalization of an existing church (church graft or transplant)
+
+-   An entirely new church in a new location (physically separate from sending church)
+
+-   Establishment of a new worshiping community linked to an existing church
+
 ```{r plant_type}
+
+n_cpt_resp <- sum(!is.na(scot$plant_type))
+
 scot |> 
   filter(!is.na(plant_type)) |> 
 ggplot(aes(x = plant_type)) +
   geom_bar() +
   scale_x_discrete(name = "Church plant type", drop = FALSE,
-                   guide = guide_axis(n.dodge = 2)) +
+                   labels = 
+                     relabeller(
+                       "Entirely new church" ~ "Entirely new\nchurch",
+                       "Linked worshipping community" ~
+                         "Linked worshipping\ncommunity"
+                     )) +
   ylab("Church plants") +
   ggtitle("Types of church plant") +
-  scale_y_continuous(breaks = seq(0, 10, 2))
+  scale_y_continuous(breaks = seq(0, 10, 2),
+                     sec.axis = 
+                       sec_axis(transform = \(x) x/ n_cpt_resp,
+                                labels    = label_percent(1),
+                                breaks = seq(0, 20, 2)/n_cpt_resp)) +
+  theme(panel.grid.major.x = element_blank())
 
 filter(scot, !is.na(plant_type)) |> 
 count_with_percent(plant_type) |> 
   rename(`Plant type` = plant_type) |>
   church_plants() |> 
   kable()
-  
 ```
 
 ## Geography
+
+Which of these best describes the geographical area you planted into? Please tick all that apply
 
 ```{r geography}
 not_na <- \(x) !is.na(x)
@@ -340,6 +416,8 @@ geog_table |>
 
 ### Traditions
 
+What were the traditions of the church planting team? Tick all that apply
+
 ```{r traditions}
 trad_responders <- 
   filter(scot, if_any(starts_with("tradition_"), not_na)) |> 
@@ -384,6 +462,20 @@ trad_table |>
 
 ### Location
 
+Where dioes the church plant meet:
+
+-   In someone's home or a variety of homes
+
+-   In another church's building, which we rent
+
+-   In another church's building, which we use free of charge (this includes the sending church's building)
+
+-   In a rented space that isn't a church building
+
+-   In a space owned exclusively by the church plant
+
+-   Other (please specify)
+
 ```{r location}
 filter(scot, !is.na(location)) |> 
   count_with_percent(location) |> 
@@ -393,10 +485,12 @@ filter(scot, !is.na(location)) |>
 n_loc_r <- sum(!is.na(scot$location))
 
 ggplot(scot, aes(x = location)) + 
+  
   geom_bar() +
+  
   ylab("Church plants") + 
   xlab("Location") +
-  ggtitle("Meeting locations used by church plants") +
+
   scale_y_continuous(
     sec.axis = sec_axis(
       transform = \(x) x / n_loc_r,
@@ -404,12 +498,35 @@ ggplot(scot, aes(x = location)) +
       breaks = seq(0, 20, 2) / n_loc_r
     )
   ) +
+  
   scale_x_discrete(
-    guide = guide_axis(n.dodge = 2)
-  )
+    guide = guide_axis(n.dodge = 1),
+    labels = 
+      relabeller(
+        "Rented space (not church building)" ~ 
+          "Rented space\n(not church building)",
+        "Rented church building" ~
+          "Rented church\nbuilding",
+        "Free church building" ~
+          "Free church\nbuilding",
+        "Space owned by plant" ~
+          "Space owned\nby plant"
+      )) +
+  
+    ggtitle("Meeting locations used by church plants")
+```
+
+"Other" responses:
+
+```{r other_location_responses}
+#| output: asis
+scot$location_other[!is.na(scot$location_other)] |> 
+  str_c("* ", foo = _,  sep = "", collapse = "\n")
 ```
 
 ## FTE
+
+Please use the sliders below to indicate the percentage of full time hours worked for the church plant/new worshiping community by any paid members of staff. If a staff member splits their role between the church plant and other responsibilities, please estimate the amount of their paid time that they spend working for the church plant.
 
 #### Members of staff
 
@@ -483,7 +600,7 @@ scot |>
   filter(!is.na(employee_fte)) |> 
   mutate(employee_fte = employee_fte/100,
          respondent_id = fct_reorder(respondent_id, -employee_fte, sum)) |>
-  mutate(y_pos = beeswarmify(employee_fte, mult = 0.75),
+  mutate(y_pos = beeswarmify(employee_fte, mult = 0.9),
          .by = c(respondent_id, employee_fte)) |> 
   
   ggplot(aes(y = y_pos, x = employee_fte)) +
@@ -491,27 +608,52 @@ scot |>
   geom_point(colour = ca_cyan(), size = 2, alpha = 0.9) +
   
   scale_y_discrete(drop = FALSE) +
+  scale_x_continuous(breaks = seq(0, 1, 0.25), limits = 0:1) +
   
   theme(
     axis.text.y = element_blank(),
     axis.ticks.y = element_blank(),
-    panel.background = element_rect(fill = NA, colour = "gray90"),
+    panel.background = element_rect(fill = colorspace::lighten(ca_cyan(), 0.9),
+                                    colour = muted(ca_cyan(), 20, 50),
+                                    ),
     strip.text = element_blank(),
     panel.spacing.y = unit(.25, "lines"),
-    plot.caption = element_text(colour = "gray30")
+    plot.caption = element_text(colour = "gray30"),
+    panel.grid.major.x = element_line(colour = "gray50",
+                                      linetype = "dotted"),
+    panel.grid.minor.x = element_blank()
   ) +
   
-  labs(y = "Churh plant",
-       x = "Employees by FTE",
+  labs(y = "Churh plants",
+       x = "FTE (individual employees)",
        caption = "Some FTE represent appx. % of split roles") + 
   
   facet_wrap(~respondent_id, dir = "v", ncol = 1, scales = "free_y",
             strip.position = "left", drop = FALSE) +
   ggtitle("Variation in Employees/FTE",
           sub = "Across all church plants")
+
+n_fte_resp <- sum(!is.na(scot$fte))
+
+ggplot(scot, aes(x = fte)) + 
+  geom_histogram(boundary = 0.01, binwidth = 0.5) +
+  
+  labs(
+    title = "Total full-time equivalence of all employees",
+    x = "Total FTE",
+    y = "Church plants") +
+  
+  scale_y_continuous(
+    sec.axis = 
+      sec_axis(
+        transform = \(x) x / n_fte_resp,
+        labels = label_percent(1),
+        breaks = seq(0, 20, 2)/n_fte_resp))
 ```
 
 ## Mission focus
+
+Which group of people is your church plant primarily aimed at/intended for? Please tick all that apply.
 
 ```{r plot_mission_focus}
 mission_foci <- 
@@ -575,6 +717,8 @@ Most church plants only identified one missional focus.
 
 ## % Non/dechurched
 
+To the best of your knowledge, what percentage of your attenders come from \[non-churched\|de-churched\] backgrounds?
+
 ```{r pc_non_de}
 scot <- mutate(scot, pc_non_de = pc_nonchurched + pc_dechurched)
 
@@ -584,7 +728,7 @@ ggplot(scot, aes(x = pc_non_de)) +
   geom_histogram(binwidth = 10, boundary = 0.25) +
   
   scale_x_continuous(name = "Non/de-churched attenders",
-                     breaks = seq(0,100, 10), limits = c(0,100),
+                     breaks = seq(0,100, 10), limits = c(0, NA),
                      labels = \(x) str_c(x, "%")) +
   scale_y_continuous(name = "Church plants", 
                      sec.axis = sec_axis(transform = \(y) y/non_de_resp,
@@ -593,6 +737,37 @@ ggplot(scot, aes(x = pc_non_de)) +
   ggtitle("% Non/de-churched attenders at each church plant") +
   
   theme(panel.grid.minor = element_blank()) 
+
+non_de <- 
+  pivot_longer(scot, starts_with("pc_") & !pc_non_de,
+             names_to = "stat", values_to = "n",
+             names_prefix = "pc_") |> 
+  mutate(stat = str_to_title(stat))
+
+n_non_de_resp <- ceiling(nrow(non_de)/2)
+  
+  ggplot(non_de, aes(x = n)) +
+  
+  geom_histogram(binwidth = 10, boundary = 0.5) +
+  
+  scale_x_continuous(breaks = seq(0, 100, 20),
+                     name = "% Attenders",
+                     labels = \(x) str_c(x, "%")) +
+  
+  scale_y_continuous(name = "Church plants",
+                     breaks = seq(0, 100, 2),
+                     sec.axis = 
+                       sec_axis(
+                         transform = \(x) x/n_non_de_resp,
+                         labels = label_percent(1),
+                         breaks = seq(0, 100, 2) / n_non_de_resp
+                       )) +
+  
+  theme(panel.grid.minor.x = element_blank()) +
+    
+    ggtitle("% Non/Dechurched attenders across church plants") + 
+  
+  facet_wrap(~ stat, dir = "v")
 
 baz <- 
 ggplot(scot, aes(x = pc_nonchurched, y = pc_dechurched)) + 
@@ -612,6 +787,8 @@ ggplot(scot, aes(x = pc_nonchurched, y = pc_dechurched)) +
 
 ## Faith commitments
 
+How many faith commitments would you estimate your church has seen since it first started?
+
 An overview of distribution for internal benefit
 
 ```{r faith_commitments}
@@ -624,6 +801,8 @@ ggplot(scot) +
 ```
 
 ## Success in reaching non/dechurched
+
+Compared to your original aspirations, how successful/unsuccessful has the church plant been at reaching those who are non-churched or de-churched?
 
 ```{r success_reaching_non_de}
 
@@ -659,6 +838,8 @@ scot |>
 
 ### Difference services
 
+On a scale from 1 to 100, how different are your church's regular services from those of your sending church? (0: absolutely identical, 100: completely re-imagined)
+
 ```{r difference_services}
 scot$how_different_from_sending_services
 ggplot(scot, aes(x = how_different_from_sending_services)) + 
@@ -681,6 +862,8 @@ ggplot(scot, aes(x = how_different_from_sending_services)) +
 ```
 
 ## Extent to which church plants have had to develop new missional practises
+
+To what extent has the church plant had to develop new practices in order to reach and disciple people who do not already go to church?
 
 ```{r develop_practises}
 n_prac_resp <- sum(!is.na(scot$extent_develop_new_missional_practices))
@@ -717,6 +900,8 @@ scot |>
 
 ## Various freetext fields
 
+Based on your experiences, what would you say are the key factors that help determine whether a church plant thrives and flourishes?
+
 ### Flourish factors
 
 ```{r flourish_factors}
@@ -730,10 +915,13 @@ scot |>
   pivot_longer(starts_with("flourish_")) |> 
   filter(!is.na(value)) |> 
   pull(value) |> 
-  bullets()
+  bullets() |> 
+  cat()
 ```
 
 ### Inhibit factors
+
+Based on your experiences, what would you say are the key factors that inhibit a church plant's growth and development?
 
 ```{r inhibit_factors}
 #| output: asis 
@@ -741,7 +929,8 @@ scot |>
   pivot_longer(starts_with("inhibit_")) |> 
   filter(!is.na(value)) |> 
   pull(value) |> 
-  bullets()
+  bullets() |> 
+  cat()
 ```
 
 ### How engage non/de churched
