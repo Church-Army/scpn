@@ -5,7 +5,7 @@ format:
   docx:
     fig-dpi: 600
     fig-width: 6
-    reference-doc: ca-template.docx
+    reference-doc: caru-template.docx
 editor: visual
 echo: false
 # knitr: 
@@ -42,6 +42,8 @@ library(rlang)
 
 ```{r read_data}
 scot <- readRDS(here("data", "output-01_cleaned-formatted.RDS"))
+
+scot <- filter(scot, !denomination_other %in% "Test sample")
 ```
 
 ## Helpers
@@ -108,7 +110,10 @@ What denomination/network/movement is your church plant affiliated with?
 ```{r denomination}
 mutate(scot, denomination =
          ordered(denomination) |> 
-         fct_infreq()) |>
+         fct_infreq() |> 
+         fct_lump_n(7)) |>
+  
+  filter(!is.na(denomination)) |> 
   
   ggplot(aes(x = denomination)) +
   
@@ -120,15 +125,27 @@ mutate(scot, denomination =
   scale_x_discrete(
     labels = relabeller(
       "Assemblies of God" ~ "Assemblies of\nGod",
-      "Scottish Network Churches" ~ "Scottish Network\nChurches"
+      "Scottish Network Churches" ~ "Scottish Network\nChurches",
+      "Church of Scotland" ~ "CoS",
+      "New Frontiers" ~ "New\nFrontiers",
+      "Free Church of Scotland" ~ "Free CoS",
+      "Redeemed Christian Church of God" ~ "RCCoG"
     )
   ) +
+  
+  scale_y_continuous(
+    sec.axis = sec_axis(
+      transform = \(x) x / sum(!is.na(scot$denomination)),
+      labels = label_percent(1),
+      breaks = seq(0, 20, 5)/ sum(!is.na(scot$denomination)))
+    ) + 
   
   ggtitle("Denominations of responding church plants") +
   
   theme(panel.grid.major.x = element_blank())
 
-factor_table(denomination) |> 
+factor_table(denomination,
+             filter(scot, !is.na(denomination))) |> 
   church_plants() |> 
   kable()
 ```
@@ -162,8 +179,8 @@ ggplot(dates, aes(x = launch_date, y = n_plants)) +
   
   scale_y_continuous(
     name = "Church plants", 
-    limits = c(0, NA),
-    breaks = 0:10 * 2
+    limits = c(0, 90),
+    breaks = 0:10 * 10
   ) +
   scale_x_date(name = "Date") +
   ggtitle("Cumulative church plants over time")
@@ -172,9 +189,10 @@ group_by(scot, start_year) |>
   count(name = "Churches planted") |> 
   ungroup() |> 
   arrange(start_year) |> 
+  filter(!is.na(start_year), start_year > 1900) |> 
   rename(`Launch year` = start_year) |> 
   complete(`Launch year` = full_seq(`Launch year`, 1), 
-           fill = list(n = 0)) |> 
+           fill = list(`Churches planted` = 0)) |> 
   kable()
 ```
 
@@ -251,11 +269,11 @@ ggplot(long_tenders, aes(x = factor(pos))) +
     
   geom_segment(mapping = aes(y = launch, yend = current),
                data = attenders,
-               linewidth = 2,
+               linewidth = 1,
                alpha = 0.2) +
 
   geom_point(data = long_tenders, aes(y = attenders, colour = time),
-             size = 3) +
+             size = 1, alpha = 0.7) +
   
   scale_colour_manual(values = c(ca_cyan(), ca_purple()),
                       name = "Time point") +
@@ -268,8 +286,8 @@ ggplot(long_tenders, aes(x = factor(pos))) +
         axis.text.x = element_blank()) +
   
   facet_wrap(~ age, dir = "h") +
-  ggtitle("Attendance has not diminished anywhere",
-          sub = "Either for adults or for children")
+  ggtitle("Attendance has increased at most church plants",
+          sub = "For adults and children alike")
 ```
 
 ### Current attenders
@@ -282,7 +300,7 @@ attenders |>
 ggplot(aes(x = current)) +
   geom_histogram(fill = ca_cyan(),
                  binwidth = 10, boundary = 0) +
-  scale_x_continuous(breaks = seq(0, 200, 20))+
+  scale_x_continuous(breaks = seq(0, 400, 20))+
   xlab("Attenders") +
   ylab("Church plants") + 
   
@@ -291,7 +309,7 @@ ggplot(aes(x = current)) +
       sec_axis(
         transform = \(x) x / n_resp_att,
         labels = label_percent(1),
-        breaks = seq(0, 10, 2)/n_resp_att
+        breaks = seq(0, 40, 10)/n_resp_att
       )
   ) +
   
@@ -311,7 +329,7 @@ attenders |>
       sec_axis(
         transform = \(x) x / n_resp_att,
         labels = label_percent(1),
-        breaks = seq(0, 10, 1)/n_resp_att
+        breaks = seq(0, 30, 5)/n_resp_att
       )) +
   
   ylab("Church plants") +
@@ -350,11 +368,11 @@ ggplot(aes(x = plant_type)) +
                      )) +
   ylab("Church plants") +
   ggtitle("Types of church plant") +
-  scale_y_continuous(breaks = seq(0, 10, 2),
+  scale_y_continuous(breaks = seq(0, 100, 10),
                      sec.axis = 
                        sec_axis(transform = \(x) x/ n_cpt_resp,
                                 labels    = label_percent(1),
-                                breaks = seq(0, 20, 2)/n_cpt_resp)) +
+                                breaks = seq(0, 100, 10)/n_cpt_resp)) +
   theme(panel.grid.major.x = element_blank())
 
 filter(scot, !is.na(plant_type)) |> 
@@ -381,17 +399,21 @@ geogs <-
   pivot_longer(starts_with("geography_") & !ends_with("_other"),
                names_prefix = "geography_",
                names_to = "geography", values_to = "is") |>
-  summarise(plants = sum(is), .by = geography)
+  mutate(geography =
+           str_to_title(geography) |> 
+           str_replace_all("_", " ") |> 
+           ordered()) |> 
+  summarise(plants = sum(is), .by = geography) |> 
+  mutate(geography =
+           fct_lump_n(geography, 6, w = plants) |> 
+           fct_infreq(w = plants) |> 
+           fct_relevel("Other", after = Inf)) |> 
+  summarise(plants = sum(plants), .by = geography)
 
 geog_table <-
   geogs |>
   arrange(-plants) |> 
-  mutate(`% responding plants` = label_percent(1)(plants / geog_responders)) |> 
-  mutate(geography =
-           str_to_title(geography) |> 
-           str_replace_all("_", " ") |> 
-           ordered() |> 
-           fct_inorder()) 
+  mutate(`% responding plants` = label_percent(1)(plants / geog_responders)) 
 
 
 geog_table |> 
@@ -403,15 +425,21 @@ geog_table |>
   filter(plants > 0) |> 
   ggplot(aes(x = geography, y = plants)) +
   geom_col() +
-  scale_x_discrete(name = "Geographical area") +
+  scale_x_discrete(name = "Geographical area",
+                   labels = 
+                     relabeller(
+                       "Specific geographical area within a larger town or city" ~
+                         "Specific area\nin town/city"
+                     )) +
   ggtitle("Geographical areas into which churches planted",
          sub = "(Non-exclusive categories)") +
   ylab("Church plants") +
   scale_y_continuous(
     sec.axis = sec_axis(
       transform = \(x) x/geog_responders,
-      labels = label_percent(),
-      breaks = seq(1, 7, 2)/geog_responders))
+      labels = label_percent(1),
+      breaks = seq(0, 40, 10)/geog_responders)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
 ### Traditions
@@ -448,15 +476,15 @@ trad_table |>
   filter(plants > 0) |> 
   ggplot(aes(x = tradition, y = plants)) +
   geom_col() +
-  scale_x_discrete(name = "Geographical area") +
+  scale_x_discrete(name = "Tradition", guide = guide_axis(n.dodge = 2)) +
   ggtitle("Traditions of church-planting teams",
          sub = "(Non-exclusive categories)") +
   ylab("Church plants") +
   scale_y_continuous(
-    breaks = seq(0, 10, 2),
+    breaks = seq(0, 100, 10),
     sec.axis = sec_axis(transform = \(x) x/trad_responders,
-                        labels = label_percent(),
-                        breaks = seq(0, 10, 2)/trad_responders)
+                        labels = label_percent(1),
+                        breaks = seq(0, 100, 10)/trad_responders)
   )
 ```
 
@@ -484,7 +512,7 @@ filter(scot, !is.na(location)) |>
 
 n_loc_r <- sum(!is.na(scot$location))
 
-ggplot(scot, aes(x = location)) + 
+ggplot(filter(scot, !is.na(location)), aes(x = location)) + 
   
   geom_bar() +
   
@@ -494,8 +522,8 @@ ggplot(scot, aes(x = location)) +
   scale_y_continuous(
     sec.axis = sec_axis(
       transform = \(x) x / n_loc_r,
-      labels = label_percent(),
-      breaks = seq(0, 20, 2) / n_loc_r
+      labels = label_percent(1),
+      breaks = seq(0, 50, 10) / n_loc_r
     )
   ) +
   
@@ -521,7 +549,8 @@ ggplot(scot, aes(x = location)) +
 ```{r other_location_responses}
 #| output: asis
 scot$location_other[!is.na(scot$location_other)] |> 
-  str_c("* ", foo = _,  sep = "", collapse = "\n")
+  str_c("* ", foo = _,  sep = "", collapse = "\n") |> 
+  cat()
 ```
 
 ## FTE
@@ -547,12 +576,12 @@ scot <- left_join(scot, employees, by = "respondent_id")
 ggplot(scot, aes(x = employees)) + 
   geom_histogram(binwidth = 1) +
   
-  scale_x_continuous("Paid members of staff", breaks = 0:6) +
+  scale_x_continuous("Paid members of staff", breaks = 0:8) +
   scale_y_continuous(
     sec.axis = sec_axis(
       transform = \(x) x/nrow(scot),
-      labels = label_percent(),
-      breaks = seq(0, 6, 2)/nrow(scot))) +
+      labels = label_percent(1),
+      breaks = seq(0, 40, 10)/nrow(scot))) +
   
   ylab("Church plants") +
   ggtitle("Paid members of staff across all church plants") 
@@ -579,7 +608,7 @@ scot <-
   mutate(fte = fte/100) |> 
   ungroup()
 
-scot$fte
+# scot$fte
 
 foo <- 
 ggplot(scot) +
@@ -592,46 +621,46 @@ ggplot(scot) +
   geom_abline(intercept = 0, slope = 0.5, 
               linetype = "dashed")
 
-scot |> 
-  pivot_longer(starts_with(c("percent_fte_", "staff_member")),
-               names_to = "remove", values_to = "employee_fte") |> 
-  select(-remove) |> 
-  mutate(respondent_id = ordered(respondent_id)) |> 
-  filter(!is.na(employee_fte)) |> 
-  mutate(employee_fte = employee_fte/100,
-         respondent_id = fct_reorder(respondent_id, -employee_fte, sum)) |>
-  mutate(y_pos = beeswarmify(employee_fte, mult = 0.9),
-         .by = c(respondent_id, employee_fte)) |> 
-  
-  ggplot(aes(y = y_pos, x = employee_fte)) +
-  
-  geom_point(colour = ca_cyan(), size = 2, alpha = 0.9) +
-  
-  scale_y_discrete(drop = FALSE) +
-  scale_x_continuous(breaks = seq(0, 1, 0.25), limits = 0:1) +
-  
-  theme(
-    axis.text.y = element_blank(),
-    axis.ticks.y = element_blank(),
-    panel.background = element_rect(fill = colorspace::lighten(ca_cyan(), 0.9),
-                                    colour = muted(ca_cyan(), 20, 50),
-                                    ),
-    strip.text = element_blank(),
-    panel.spacing.y = unit(.25, "lines"),
-    plot.caption = element_text(colour = "gray30"),
-    panel.grid.major.x = element_line(colour = "gray50",
-                                      linetype = "dotted"),
-    panel.grid.minor.x = element_blank()
-  ) +
-  
-  labs(y = "Churh plants",
-       x = "FTE (individual employees)",
-       caption = "Some FTE represent appx. % of split roles") + 
-  
-  facet_wrap(~respondent_id, dir = "v", ncol = 1, scales = "free_y",
-            strip.position = "left", drop = FALSE) +
-  ggtitle("Variation in Employees/FTE",
-          sub = "Across all church plants")
+# scot |> 
+#   pivot_longer(starts_with(c("percent_fte_", "staff_member")),
+#                names_to = "remove", values_to = "employee_fte") |> 
+#   select(-remove) |> 
+#   mutate(respondent_id = ordered(respondent_id)) |> 
+#   filter(!is.na(employee_fte)) |> 
+#   mutate(employee_fte = employee_fte/100,
+#          respondent_id = fct_reorder(respondent_id, -employee_fte, sum)) |>
+#   mutate(y_pos = beeswarmify(employee_fte, mult = 0.9),
+#          .by = c(respondent_id, employee_fte)) |> 
+#   
+#   ggplot(aes(y = y_pos, x = employee_fte)) +
+#   
+#   geom_point(colour = ca_cyan(), size = 2, alpha = 0.9) +
+#   
+#   scale_y_discrete(drop = FALSE) +
+#   scale_x_continuous(breaks = seq(0, 1, 0.25), limits = 0:1) +
+#   
+#   theme(
+#     axis.text.y = element_blank(),
+#     axis.ticks.y = element_blank(),
+#     panel.background = element_rect(fill = colorspace::lighten(ca_cyan(), 0.9),
+#                                     colour = muted(ca_cyan(), 20, 50),
+#                                     ),
+#     strip.text = element_blank(),
+#     panel.spacing.y = unit(.25, "lines"),
+#     plot.caption = element_text(colour = "gray30"),
+#     panel.grid.major.x = element_line(colour = "gray50",
+#                                       linetype = "dotted"),
+#     panel.grid.minor.x = element_blank()
+#   ) +
+#   
+#   labs(y = "Churh plants",
+#        x = "FTE (individual employees)",
+#        caption = "Some FTE represent appx. % of split roles") + 
+#   
+#   facet_wrap(~respondent_id, dir = "v", ncol = 1, scales = "free_y",
+#             strip.position = "left", drop = FALSE) +
+#   ggtitle("Variation in Employees/FTE",
+#           sub = "Across all church plants")
 
 n_fte_resp <- sum(!is.na(scot$fte))
 
@@ -648,7 +677,9 @@ ggplot(scot, aes(x = fte)) +
       sec_axis(
         transform = \(x) x / n_fte_resp,
         labels = label_percent(1),
-        breaks = seq(0, 20, 2)/n_fte_resp))
+        breaks = seq(0, 30, 10)/n_fte_resp))
+
+
 ```
 
 ## Mission focus
@@ -670,7 +701,7 @@ mission_foci <-
   mutate(mission_focus =
            ordered(mission_focus) |> 
            fct_reorder(-prop) |> 
-           fct_relevel("None", after = Inf)) |> 
+           fct_relevel("none", after = Inf)) |> 
   arrange(-prop)
 
 m_f_resp <- 
@@ -683,11 +714,11 @@ ggplot(mission_foci, aes(x = mission_focus, y = count)) +
   geom_col() +
   
   scale_y_continuous(name = "Church plants",
-                     breaks = seq(0,10,2),
+                     breaks = seq(0,100,10),
                      sec.axis = sec_axis(
                        transform = \(x) x / m_f_resp,
                        labels = label_percent(),
-                       breaks = seq(0,10, 2)/m_f_resp,
+                       breaks = seq(0,100,10)/m_f_resp,
                        name = "% responding plants"
                      )) +
   
@@ -722,18 +753,22 @@ To the best of your knowledge, what percentage of your attenders come from \[non
 ```{r pc_non_de}
 scot <- mutate(scot, pc_non_de = pc_nonchurched + pc_dechurched)
 
+scot$pc_nonchurched[scot$pc_non_de > 100] <- NA
+scot$pc_dechurched[scot$pc_non_de > 100]  <- NA
+scot$pc_non_de[scot$pc_non_de > 100] <- NA
+
 non_de_resp <- sum(!is.na(scot$pc_non_de))
 
-ggplot(scot, aes(x = pc_non_de)) +
+ggplot(filter(scot, pc_non_de <= 100), aes(x = pc_non_de)) +
   geom_histogram(binwidth = 10, boundary = 0.25) +
   
   scale_x_continuous(name = "Non/de-churched attenders",
-                     breaks = seq(0,100, 10), limits = c(0, NA),
+                     breaks = seq(0, 100, 10), limits = c(0, NA),
                      labels = \(x) str_c(x, "%")) +
   scale_y_continuous(name = "Church plants", 
                      sec.axis = sec_axis(transform = \(y) y/non_de_resp,
                                          labels = label_percent(1),
-                                         breaks = 1:10/non_de_resp)) +
+                                         breaks = seq(0, 15, 5)/non_de_resp)) +
   ggtitle("% Non/de-churched attenders at each church plant") +
   
   theme(panel.grid.minor = element_blank()) 
@@ -755,12 +790,12 @@ n_non_de_resp <- ceiling(nrow(non_de)/2)
                      labels = \(x) str_c(x, "%")) +
   
   scale_y_continuous(name = "Church plants",
-                     breaks = seq(0, 100, 2),
+                     breaks = seq(0, 100, 10),
                      sec.axis = 
                        sec_axis(
                          transform = \(x) x/n_non_de_resp,
                          labels = label_percent(1),
-                         breaks = seq(0, 100, 2) / n_non_de_resp
+                         breaks = seq(0, 100, 10) / n_non_de_resp
                        )) +
   
   theme(panel.grid.minor.x = element_blank()) +
@@ -768,21 +803,6 @@ n_non_de_resp <- ceiling(nrow(non_de)/2)
     ggtitle("% Non/Dechurched attenders across church plants") + 
   
   facet_wrap(~ stat, dir = "v")
-
-baz <- 
-ggplot(scot, aes(x = pc_nonchurched, y = pc_dechurched)) + 
-  geom_point()
-
-# scot |> 
-#   select(-pc_non_de) |> 
-#   pivot_longer(starts_with("pc_"),
-#                names_to = "non_de",
-#                values_to = "percent") |> 
-#   ggplot(aes(x = percent)) +
-#   geom_histogram(binwidth = 10, boundary = 0.9) +
-#   
-#   facet_wrap(~ non_de, dir = "v")
-
 ```
 
 ## Faith commitments
@@ -797,7 +817,7 @@ n_resp_fc <- sum(!is.na(scot$total_faith_commitments))
 ggplot(scot) + 
   geom_beeswarm(aes(y = total_faith_commitments, x = 1),
                 size = 1, alpha = 0.6, colour = ca_cyan()) +
-  scale_x_continuous(limits = c(0.9,1.5))
+  scale_x_continuous(limits = c(0.9,1.1))
 ```
 
 ## Success in reaching non/dechurched
@@ -816,7 +836,7 @@ ggplot(aes(x = success_reaching_nondechurched)) +
     sec.axis = sec_axis(
       transform = \(x) x/n_srn_resp,
       labels = label_percent(1),
-      breaks = 0:5/n_srn_resp
+      breaks = seq(0, 30, 10)/n_srn_resp
     )
   ) +
   labs(
@@ -841,7 +861,7 @@ scot |>
 On a scale from 1 to 100, how different are your church's regular services from those of your sending church? (0: absolutely identical, 100: completely re-imagined)
 
 ```{r difference_services}
-scot$how_different_from_sending_services
+# scot$how_different_from_sending_services
 ggplot(scot, aes(x = how_different_from_sending_services)) + 
   geom_density(fill = ca_cyan(), col = ca_cyan(), 
                alpha = 0.5) +
@@ -877,7 +897,7 @@ ggplot(aes(x = extent_develop_new_missional_practices)) +
     sec.axis = sec_axis(
       transform = \(x) x/n_prac_resp,
       labels = label_percent(),
-      breaks = 0:3/n_prac_resp
+      breaks = seq(0, 30, 10)/n_prac_resp
     )
   ) +
   labs(

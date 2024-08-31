@@ -22,7 +22,7 @@ library(forcats)
 
 ```{r read_csv}
 #| cache: true
-scottish <- read_sm(here("inputs", "scpn-survey_2024-08-06.csv"))
+scottish <- read_sm(here("inputs", "scpn-survey_2024-08-31.csv"))
 ```
 
 ## Drop columns
@@ -58,13 +58,12 @@ scottish <-
 But not before we've double checked they're all checked.
 
 ```{r drop_consents}
-with(scottish,
-     
-     stopifnot(
-       all(before_we_begin_please_confirm_the_following ==
-             "I have read the participant information sheet and know who to ask if I have any questions"),
-       all(i_understand_that_my_participation_in_this_research_is_voluntary_11 ==
-             "I understand that my participation in this research is voluntary")))
+
+scottish <- filter(scottish, 
+                   before_we_begin_please_confirm_the_following ==
+                     "I have read the participant information sheet and know who to ask if I have any questions",
+                   i_understand_that_my_participation_in_this_research_is_voluntary_11 ==
+                     "I understand that my participation in this research is voluntary")
 
 scottish <- select(scottish, -before_we_begin_please_confirm_the_following,
                -i_understand_that_my_participation_in_this_research_is_voluntary_11)
@@ -159,13 +158,29 @@ scottish <-
   mutate(
     scottish, 
     
-    denomination = replace(denomination, str_to_lower(denomination_other) == "fiec", "FIEC"),
-    denomination_other = replace(denomination_other, str_to_lower(denomination_other) == "fiec", NA),
+    denomination = replace(denomination,
+                           str_detect(str_to_lower(denomination_other), "fiec"),
+                           "FIEC"),
+    denomination_other =
+      replace(denomination_other, str_to_lower(denomination_other) == "fiec", NA),
     
-    denomination = factor(denomination, levels = c("Elim", "Go Global", "Scottish Episcopal Church", "Free Church of Scotland", "Scottish Baptist Union",
+    denomination =
+      replace(denomination, denomination_other == "Go Global Network", "Go Global"),
+    denomination_other = 
+      replace(denomination_other, denomination_other == "Go Global Network", NA),
+    
+    denomination = 
+      replace(denomination, str_detect(denomination_other, "[Ii]ndependent"),
+              "Independent"),
+    denomination_other = 
+      replace(denomination_other, str_detect(denomination_other, "[Ii]ndependent"),
+              NA),
+    
+    denomination = factor(denomination, levels = 
+                            c("Elim", "Go Global", "Scottish Episcopal Church", "Free Church of Scotland", "Scottish Baptist Union",
                                                    "New Frontiers", "Assemblies of God", "Church of Scotland", "Scottish Network Churches", "Vineyard",
                                                    "Redeemed Christian Church of God", "Church of the Nazarene", "ReHope", "Salvation Army",
-                                                   "Free Methodist Church", "Cairn Movement", "FIEC")),
+                                                   "Free Methodist Church", "Cairn Movement", "FIEC", "Independent")),
     
     plant_type =
       case_when(
@@ -206,6 +221,11 @@ scottish <-
 
 format_start_month <- function(x){
   
+  num_x <- str_detect(x, "^//d+$")
+  num_x[is.na(num_x)] <- FALSE
+  
+  x[num_x] <- month.name[as.numeric(x[num_x])]
+  
   x[x %in% month.name] <- 
     str_to_title(x[x %in% month.name]) |> 
     match(month.name)
@@ -218,6 +238,13 @@ format_start_month <- function(x){
     
   as.numeric(x)
 }
+
+scottish$start_month[scottish$start_month == "August (I think)"] <- "August"
+scottish$start_month[scottish$start_month == "Not sure if it's the month of May"] <-
+  "May"
+scottish$start_month[scottish$start_month == "Febuary"] <- "February"
+scottish$start_month[scottish$start_month == "Janaury"] <- "January"
+scottish$start_month[scottish$start_month == "Septe"]   <- "Sept"
 
 scottish <- 
   mutate(
