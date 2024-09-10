@@ -58,12 +58,14 @@ scottish <-
 But not before we've double checked they're all checked.
 
 ```{r drop_consents}
-
+nrow(scottish)
 scottish <- filter(scottish, 
                    before_we_begin_please_confirm_the_following ==
                      "I have read the participant information sheet and know who to ask if I have any questions",
                    i_understand_that_my_participation_in_this_research_is_voluntary_11 ==
                      "I understand that my participation in this research is voluntary")
+
+nrow(scottish)
 
 scottish <- select(scottish, -before_we_begin_please_confirm_the_following,
                -i_understand_that_my_participation_in_this_research_is_voluntary_11)
@@ -129,6 +131,7 @@ rbind(scottish, completeness)
 filter(scottish, completeness < 0.8, completeness > 0.2)
 filter(scottish, completeness < 0.2)
 
+nrow(scottish)
 scottish <- filter(scottish, completeness > 0.2)
 nrow(scottish)
 ```

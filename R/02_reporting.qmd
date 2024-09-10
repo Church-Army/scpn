@@ -108,14 +108,16 @@ relabeller <- function(...){
 What denomination/network/movement is your church plant affiliated with?
 
 ```{r denomination}
+denom <- 
 mutate(scot, denomination =
          ordered(denomination) |> 
          fct_infreq() |> 
          fct_lump_n(7)) |>
   
-  filter(!is.na(denomination)) |> 
+  filter(!is.na(denomination)) 
   
-  ggplot(aes(x = denomination)) +
+
+ggplot(denom, aes(x = denomination)) +
   
   geom_bar() +
   
@@ -144,9 +146,20 @@ mutate(scot, denomination =
   
   theme(panel.grid.major.x = element_blank())
 
+denom <-
 factor_table(denomination,
              filter(scot, !is.na(denomination))) |> 
   church_plants() |> 
+  set_names("Denomination", "Church plants (all time)", "% (all time)")
+
+denom_2010 <-
+  factor_table(
+    denomination,
+    filter(scot, !is.na(denomination), start_year >= 2010)) |> 
+  church_plants() |> 
+  set_names("Denomination", "Church plants (since 2010)", "% (since 2010)")
+
+left_join(denom, denom_2010, by = "Denomination") |> 
   kable()
 ```
 
@@ -194,6 +207,30 @@ group_by(scot, start_year) |>
   complete(`Launch year` = full_seq(`Launch year`, 1), 
            fill = list(`Churches planted` = 0)) |> 
   kable()
+
+cppy_mean<- 
+  filter(scot, start_year >= 2010) |> 
+  group_by(start_year) |> 
+  count() |>
+  pull(n) |> 
+  mean()
+
+ggplot(scot |> filter(start_year >= 2010),
+       aes(x = start_year)) + 
+    
+  geom_hline(yintercept = cppy_mean, linetype = "dashed") + 
+  geom_bar(alpha = 0.9) +
+  
+  annotate("text", label = "Yearly average", 
+           x = 2011, y = cppy_mean + 0.5, size = 4) +
+  
+  scale_y_continuous(name = "Churches planted",
+                     breaks = seq(0, 10, 2)) +
+
+  
+  xlab("Year of Launch") +
+  ggtitle("Responding church plants by launch year",
+          "Since 2010")
 ```
 
 ### Attenders (current and at launch)
@@ -668,7 +705,7 @@ ggplot(scot, aes(x = fte)) +
   geom_histogram(boundary = 0.01, binwidth = 0.5) +
   
   labs(
-    title = "Total full-time equivalence of all employees",
+    title = "Total full-time-equivalent staff",
     x = "Total FTE",
     y = "Church plants") +
   
@@ -678,6 +715,17 @@ ggplot(scot, aes(x = fte)) +
         transform = \(x) x / n_fte_resp,
         labels = label_percent(1),
         breaks = seq(0, 30, 10)/n_fte_resp))
+
+scot |>
+  mutate(fte_level = ceiling(fte * 2) / 2,
+         label = str_c(fte_level - 0.5, " - ", fte_level),
+         label = replace(label, label == "-0.5 - 0", "0"),
+         label = ordered(label) |>
+           fct_reorder(fte_level)) |>
+  factor_table(label, x = _) |> 
+  set_names("Total FTE", "Church plants", "%") |> 
+  arrange(`Total FTE`) |> 
+  kable()
 
 
 ```
@@ -722,7 +770,10 @@ ggplot(mission_foci, aes(x = mission_focus, y = count)) +
                        name = "% responding plants"
                      )) +
   
-  scale_x_discrete(name = "Mission focus", labels = str_to_title) +
+  scale_x_discrete(name = "Mission focus",
+                   labels = \(x) 
+                   relabeller("dechurched" ~ "Church\naccess")(x) |> 
+                     str_to_title()) +
   ggtitle("Most plants had a geographical mission focus",
           sub = "")
 
@@ -812,12 +863,31 @@ How many faith commitments would you estimate your church has seen since it firs
 An overview of distribution for internal benefit
 
 ```{r faith_commitments}
+library(ggrain)
+
 n_resp_fc <- sum(!is.na(scot$total_faith_commitments))
 
-ggplot(scot) + 
-  geom_beeswarm(aes(y = total_faith_commitments, x = 1),
-                size = 1, alpha = 0.6, colour = ca_cyan()) +
-  scale_x_continuous(limits = c(0.9,1.1))
+scot |> 
+  filter(!is.na(total_faith_commitments)) |> 
+  mutate(
+    faith_commitments =
+    case_when(
+      total_faith_commitments == 0 ~ "0",
+      total_faith_commitments <= 10 ~ "1-10",
+      total_faith_commitments <= 100 ~ "11-100",
+      total_faith_commitments > 100  ~ "101+"
+    ) |> 
+      ordered() |> 
+      fct_reorder(total_faith_commitments)) |> 
+    group_by(faith_commitments) |> 
+    count() |> 
+  arrange(faith_commitments) |> 
+  ungroup() |> 
+  mutate(`%` = label_percent(1)(prop.table(n))) |> 
+  rename("Faith commitments" = 1) |> 
+  kable()
+
+median(scot$total_faith_commitments, na.rm = TRUE)
 ```
 
 ## Success in reaching non/dechurched
@@ -842,7 +912,7 @@ ggplot(aes(x = success_reaching_nondechurched)) +
   labs(
     y = "Church plants",
     x = "Success in reaching non/de-churched people",
-    title = "Most church plants are reaching non/de-churched people",
+    title = "Perceived missional impact",
     subtitle = "(Success compared to anticipated success)"
   )
 
@@ -862,11 +932,17 @@ On a scale from 1 to 100, how different are your church's regular services from 
 
 ```{r difference_services}
 # scot$how_different_from_sending_services
+
+median_send_diff <- median(scot$how_different_from_sending_services, 
+                           na.rm = TRUE)
 ggplot(scot, aes(x = how_different_from_sending_services)) + 
   geom_density(fill = ca_cyan(), col = ca_cyan(), 
                alpha = 0.5) +
   
+  geom_vline(xintercept = median_send_diff, linetype = "dashed") + 
+  
   scale_x_continuous(lim = c(0,100)) +
+
   
   labs(
     y = "Density",
@@ -879,6 +955,32 @@ ggplot(scot, aes(x = how_different_from_sending_services)) +
     axis.text.y = element_blank(),
     axis.ticks.y = element_blank()
   )
+
+scot |> 
+  rename(how = how_different_from_sending_services) |> 
+  filter(!is.na(how)) |> 
+  mutate(
+    how = 
+      case_when(
+        how == 0 ~ "0%",
+        how <= 25 ~ "1-25%",
+        how <= 50 ~ "26-50%",
+        how <= 75 ~ "51-75%",
+        how <= 99 ~ "76-99%",
+        how == 100 ~ "100%"
+      ) |> 
+      ordered() |> 
+      fct_reorder(how)
+  ) |> 
+  group_by(how) |> 
+  count() |> 
+  ungroup() |> 
+  transmute(
+    `% Difference` = how,
+    n = n,
+    `%` = label_percent(1)(prop.table(n))) |> 
+  arrange(`% Difference`) |> 
+  kable()
 ```
 
 ## Extent to which church plants have had to develop new missional practises
@@ -991,3 +1093,65 @@ scot |>
   mutate(across(where(is.numeric), \(x) round(x, 2))) |> 
   kable()
 ```
+
+## Overall non-dechurched attenders
+
+```{r overall_non_de}
+scot |> 
+  mutate(non = 0.01 * pc_nonchurched * total_current_attenders,
+         de  = 0.01 * pc_dechurched  * total_current_attenders) |> 
+  summarise(across(c(non, de, total_current_attenders),
+                   \(x) sum(x, na.rm = TRUE))) |> 
+  mutate(pcn = label_percent()(non / total_current_attenders),
+         pcd = label_percent()(de / total_current_attenders))
+
+scot |> 
+  group_by(pc_nonchurched == 0 & pc_dechurched == 0) |> 
+  count()
+
+2/84
+
+non_de_labels <-
+  scot |> 
+  mutate(across(c(pc_nonchurched, pc_dechurched),
+                \(x){
+                  lab <- ceiling(x / 10) * 10
+                  
+                  lab <- str_c(lab - 10, " - ", lab)
+                  
+                  lab <-
+                    replace(lab, lab == "-10 - 0", "0") |> 
+                    str_c("%")
+                    
+                    ordered(lab) |>
+                    fct_reorder(x)
+                }))
+
+non_de_labels |> 
+  group_by(pc_nonchurched) |> 
+  count() |> 
+  ungroup() |> 
+  mutate(prop = n/sum(n)) |> 
+  filter(!is.na(pc_nonchurched)) |> 
+  transmute(`% non-churched` = pc_nonchurched,
+            `Church plants` = n, 
+            `%` = label_percent(1)(prop)) |> 
+  kable()
+
+```
+
+```{r de_table}
+  
+
+non_de_labels |> 
+  group_by(pc_dechurched) |> 
+  count() |> 
+  ungroup() |> 
+  mutate(prop = n/sum(n)) |> 
+  filter(!is.na(pc_dechurched)) |> 
+  transmute(`% de-churched` = pc_dechurched,
+            `Church plants` = n, 
+            `%` = label_percent(1)(prop)) |> 
+  kable()
+```
+
