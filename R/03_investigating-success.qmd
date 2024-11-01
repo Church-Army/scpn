@@ -1,0 +1,203 @@
+---
+title: "Investigating success"
+author: "Dave"
+format: html
+editor: visual
+---
+
+## Set up
+
+### Libraries
+
+```{r libraries}
+library(fs)
+library(here)
+library(dplyr)
+library(ggplot2)
+library(tidymodels)
+library(carutools)
+library(knitr)
+library(purrr)
+```
+
+### Read data
+
+```{r read_data}
+scot <- 
+  readRDS(here("data", "output-02_report-data.RDS")) |> 
+  filter(respondent_id != "118673892111")
+```
+
+### Defaults
+
+```{r defaults}
+theme_set(theme_ca("cyan"))
+```
+
+## Invesitage
+
+What measures might signify 'success'?
+
+-   Current attenders - launch attenders
+-   Percentage non/de churched
+-   total faith commitments
+
+### Build principal component
+
+```{r pca}
+scot <- mutate(scot, attender_gain = total_current_attenders - (launch_attenders_adult %+na% launch_attenders_children))
+
+princ <-
+  select(scot, pc_nonchurched, pc_dechurched, attender_gain, total_faith_commitments, success_reaching_nondechurched) |> 
+  mutate(success_reaching_nondechurched = as.numeric(success_reaching_nondechurched))
+
+
+princ <- filter(princ, !if_any(everything(), is.na))
+
+princ_recipe <- recipe(~., data = princ)
+
+princ_transf <- 
+  princ_recipe |> 
+  step_normalize(all_numeric()) |> 
+  step_pca(all_numeric(), num_comp = 1)
+
+dough <- prep(princ_transf, training = princ)
+cake <- bake(dough, princ)
+
+tidy(dough, number = 2, type = "variance")
+
+cake <- rename(cake, quality = PC1)
+
+icing <- 
+  cbind(
+    filter(scot, 
+         !if_any(c(pc_nonchurched, pc_dechurched,
+                   total_faith_commitments, attender_gain, success_reaching_nondechurched),
+                 is.na)),
+    cake) |> 
+  select(respondent_id, quality)
+
+scot <- left_join(scot, icing) |> 
+  mutate(quality = -quality)
+```
+### Investigative plotting
+
+```{r investigative_plotting}
+ggplot(scot, aes(x = fte, y = quality)) + 
+  geom_point(alpha = 0.3) +
+  geom_smooth()
+
+ggplot(scot, aes(x = employees, y = quality)) + 
+  geom_point(alpha = 0.3) +
+  geom_smooth()
+
+ggplot(scot, aes(x = start_date, y = quality)) +
+  geom_point(alpha = 0.3)
+
+ggplot(scot, aes(x = extent_develop_new_missional_practices, y = quality)) +
+  geom_point(alpha = 0.3)
+
+ggplot(scot, aes(x = tradition_charismatic, y = quality)) +
+  geom_point(alpha = 0.3) +
+  stat_summary(fun = "mean", colour = "red")
+
+ggplot(scot, aes(x = tradition_reformed, y = quality)) +
+  geom_point(alpha = 0.3) +
+  stat_summary(fun = "mean", colour = "red")
+
+ggplot(scot, aes(x = tradition_progressive, y = quality)) +
+  geom_point(alpha = 0.3) +
+  stat_summary(fun = "mean", colour = "red")
+
+ggplot(scot, aes(x = tradition_evangelical, y = quality)) +
+  geom_point(alpha = 0.3) +
+  stat_summary(fun = "mean", colour = "red")
+
+ggplot(scot, aes(x = location, y = quality)) +
+  geom_point(alpha = 0.3) +
+  stat_summary(fun = "mean", colour = "red") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+scot |> 
+  group_by(denomination) |> 
+  filter(n() >= 5) |> 
+  ggplot(aes(x = denomination, y = quality)) + 
+  geom_point(alpha = 0.3) +
+  stat_summary(fun = "mean", colour = "red") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+t_test <- function(y, x){
+  t.test(y[x], y[!x])
+}
+
+with(scot, t_test(quality, denomination == "Vineyard"))
+with(scot, t_test(quality, denomination == "Church of Scotland"))
+
+with(scot, t_test(attender_gain, tradition_charismatic))
+
+
+```
+
+### big table
+
+```{r big_table}
+scot |> 
+  mutate(across(where(is.ordered), as.numeric)) |> 
+  group_by(denomination) |> 
+  mutate(count = n()) |> 
+  summarise(across(where(is.numeric), \(x) mean(x, na.rm = TRUE) |> round(1))) |> 
+  select(denomination, count, attender_gain, total_faith_commitments, success_reaching_nondechurched, quality) |> 
+  arrange(-quality) |> 
+  kable()
+
+with(scot, t_test(attender_gain, denomination == "Redeemed Christian Church of God")) #0.08 HI
+with(scot, t_test(attender_gain, denomination == "Go Global")) # 0.04  LO
+with(scot, t_test(attender_gain, denomination == "Vineyard")) # 0.8
+with(scot, t_test(attender_gain, denomination == "Church of Scotland")) # 0.8
+with(scot, t_test(total_faith_commitments, denomination == "Redeemed Christian Church of God")) #0.08
+with(scot, t_test(total_faith_commitments, denomination == "Go Global")) # 0.04 
+with(scot, t_test(total_faith_commitments, denomination == "Vineyard")) # 0.8
+with(scot, t_test(as.numeric(success_reaching_nondechurched), denomination == "Redeemed Christian Church of God")) #0.08
+with(scot, t_test(as.numeric(success_reaching_nondechurched), denomination == "Go Global")) # 0.04 
+with(scot, t_test(as.numeric(success_reaching_nondechurched), denomination == "Vineyard")) # 0.8
+
+foo <-
+  scot |> 
+  mutate(across(where(is.ordered), as.numeric)) |>
+  select(denomination, attender_gain, total_faith_commitments, success_reaching_nondechurched) |>
+  pivot_longer(where(is.numeric)) |> 
+  ungroup()
+  
+foo <- mutate(foo, lists = list(foo))
+
+foo <-
+  rowwise(foo) |> 
+  mutate(lists = list(filter(lists, !denomination %in% .env$denomination, name == .env$name)))
+  
+t_try <- \(...){
+  tryCatch(t.test(...),
+            error = \(cnd) NA)
+}
+
+tests <- 
+  group_by(foo, denomination, name, lists) |> 
+  summarise(
+    mean = mean(value, na.rm = TRUE),
+    global = mean(lists[[1]]$value, na.rm = TRUE),
+    higher = mean > global,
+    result = list(t_try(value, lists[[1]]$value))
+  )
+
+ungroup(tests) |> 
+  filter(!is.na(result)) |> 
+  mutate(p = map(result, "p.value") |> unlist()) |> 
+  select(-lists, -result) |> 
+  filter(p <= 0.1) |> 
+  mutate(across(c(mean, global), \(x) round(x, 1))) |> 
+  rename(stat = name) |> 
+  arrange(stat, -mean) |> 
+  select(-p) |> 
+  kable()
+
+```
+

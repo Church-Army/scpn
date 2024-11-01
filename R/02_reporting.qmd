@@ -1155,3 +1155,8 @@ non_de_labels |>
   kable()
 ```
 
+## Save
+
+```{r save}
+saveRDS(scot, here("data", "output-02_report-data.RDS"))
+```
