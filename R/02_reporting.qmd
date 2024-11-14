@@ -1155,6 +1155,44 @@ non_de_labels |>
   kable()
 ```
 
+## Converts per year
+
+```{r converts_per_year}
+scot <- 
+  mutate(scot,
+         years_running = as.numeric((date(start_date) - launch_date)/365.25),
+         years_running = replace(years_running, years_running < 0, 0),
+         commitments_per_year = total_faith_commitments/years_running)
+
+scoot <- filter(scot, total_faith_commitments < 999)
+ 
+ggplot(scoot, aes(x = total_faith_commitments)) + 
+  geom_density()
+
+ggplot(scoot, aes(x = commitments_per_year)) + 
+  geom_density()
+
+median(scot$commitments_per_year, na.rm = TRUE)
+
+levels_after <- function(f, level){
+  lf <- levels(f)
+  n <- which(lf == level)
+  lf[n:length(lf)]
+}
+
+filter(scot, !is.na(commitments_per_year), !is.infinite(commitments_per_year)) |> 
+  mutate(cpy = range_labels(commitments_per_year, width = 1, continuous = 0.1),
+         cpy = fct_collapse(cpy, "4+" = levels_after(cpy, "4.1 - 5")) |>
+           fct_explicit_na("4+")) |> 
+  group_by(cpy) |> 
+  count() |> 
+  ungroup() |> 
+  mutate(`%` = label_percent()(prop.table(n))) |> 
+  set_names("Faith commitments per year", "Church plants", "%") |> 
+  kable()
+```
+
+
 ## Save
 
 ```{r save}
